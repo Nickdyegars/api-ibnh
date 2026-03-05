@@ -16,4 +16,6 @@ export async function rosterRoutes(app: FastifyInstance) {
   app.delete('/rosters/:id', (req, rep) => rosterController.delete(req, rep));
 
   app.post('/rosters/generate', (req, rep) => rosterController.generatePreview(req, rep));
+
+  app.put('/rosters/shift/:shiftId', (req, rep) => rosterController.updateShift(req, rep));
 }

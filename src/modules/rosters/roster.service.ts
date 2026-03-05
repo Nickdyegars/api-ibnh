@@ -200,4 +200,44 @@ export class RosterService {
             return dateA.localeCompare(dateB);
         });
     }
+
+    async updateShiftTeam(shiftId: string, newTeamNames: string[]) {
+        // 1. Encontra o turno e pega o ID do ministério para filtrar os membros corretos
+        const shift = await prisma.shift.findUnique({
+            where: { id: shiftId },
+            include: { schedule: true }
+        });
+
+        if (!shift || !shift.schedule?.ministry_id) {
+            throw new Error("Turno ou Ministério não encontrado.");
+        }
+
+        // 2. Busca os IDs dos novos membros baseados nos nomes recebidos
+        const members = await prisma.member.findMany({
+            where: {
+                ministry_id: shift.schedule.ministry_id,
+                name: { in: newTeamNames }
+            }
+        });
+
+        // 3. Usamos uma "Transação" do Prisma para garantir que não haja falhas pela metade
+        await prisma.$transaction(async (tx) => {
+            // A) Remove quem estava escalado neste dia específico
+            await tx.shiftAssignment.deleteMany({
+                where: { shift_id: shiftId }
+            });
+
+            // B) Adiciona a nova equipe
+            for (const member of members) {
+                await tx.shiftAssignment.create({
+                    data: {
+                        shift_id: shiftId,
+                        member_id: member.id
+                    }
+                });
+            }
+        });
+
+        return { success: true, message: "Equipe atualizada com sucesso!" };
+    }
 }

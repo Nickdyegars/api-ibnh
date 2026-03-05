@@ -4,6 +4,7 @@ import fastifyJwt from '@fastify/jwt';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { rosterRoutes } from './modules/rosters/roster.routes.js';
 import { memberRoutes } from './modules/members/member.routes.js';
+import { analyticsRoutes } from './modules/analytics/analytics.routes.js';
 
 const app = Fastify({ logger: true });
 
@@ -22,6 +23,7 @@ app.register(fastifyJwt, {
 app.register(authRoutes, { prefix: '/auth' });
 app.register(rosterRoutes);
 app.register(memberRoutes);
+app.register(analyticsRoutes, { prefix: '/analytics' });
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

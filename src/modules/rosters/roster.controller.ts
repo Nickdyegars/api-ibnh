@@ -2,6 +2,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { RosterService } from './roster.service.js';
 import { getRostersQuerySchema, createRosterBodySchema } from './roster.schemas.js';
+import { prisma } from '../../shared/database/prisma.js';
 
 const rosterService = new RosterService();
 
@@ -86,6 +87,44 @@ export class RosterController {
             return reply.send({ message: 'Escala apagada com sucesso' });
         } catch (error: any) {
             return reply.status(400).send({ error: 'Erro ao apagar escala' });
+        }
+    }
+
+    async updateShift(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const user = request.user as any;
+            const { shiftId } = request.params as { shiftId: string };
+            const { team } = request.body as { team: string[] };
+
+            // Busca o turno rapidinho só para sabermos de qual ministério ele é
+            const shift = await prisma.shift.findUnique({
+                where: { id: shiftId },
+                include: { schedule: { include: { ministry: true } } }
+            });
+
+            if (!shift) return reply.status(404).send({ error: "Turno não encontrado" });
+
+            // === TRAVA DE SEGURANÇA (RBAC) ===
+            if (user.level > 0) {
+                const userMinistryName = user.ministry_access || user.ministry || '';
+                const userMin = userMinistryName.trim().toLowerCase();
+                const dataMin = (shift.schedule?.ministry?.name || '').trim().toLowerCase();
+
+                const isMultimediaSub = userMin === 'multimídia' && dataMin.includes('multimídia');
+
+                if (userMin !== dataMin && !isMultimediaSub) {
+                    return reply.status(403).send({
+                        error: `Acesso negado: Seu perfil não pode editar escalas de ${shift.schedule?.ministry?.name}.`
+                    });
+                }
+            }
+            // =================================
+
+            const result = await rosterService.updateShiftTeam(shiftId, team);
+            return reply.send(result);
+        } catch (error: any) {
+            console.error("Erro ao editar turno:", error);
+            return reply.status(400).send({ error: error.message || 'Erro ao editar escala' });
         }
     }
 

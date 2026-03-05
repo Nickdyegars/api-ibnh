@@ -115,3 +115,13 @@ model ShiftAssignment {
   @@map("shift_assignments")
   @@schema("roster")
 }
+
+model SiteAnalytics {
+  id        String   @id @default(uuid())
+  action    String   // Ex: "VISIT", "WHATSAPP_CLICK", "INSTAGRAM_CLICK"
+  page      String?  // Ex: "Home", "Contactos"
+  createdAt DateTime @default(now())
+
+  @@map("site_analytics")
+  @@schema("app") // <-- Só faltava esta linha!
+}

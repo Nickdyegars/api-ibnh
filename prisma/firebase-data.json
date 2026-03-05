@@ -1,0 +1,558 @@
+{
+  "members": {
+    "-Okczx4_aC-8juzWNIHf": {
+      "createdAt": "2026-02-04T14:12:59.948Z",
+      "ministry": "Multimídia / Transmissão",
+      "name": "Nick",
+      "phone": "(73) 98172-0360"
+    },
+    "-Okd5gsDZiMrs9iXv0kG": {
+      "createdAt": "2026-02-04T14:42:28.640Z",
+      "ministry": "Multimídia / Transmissão",
+      "name": "Daniel",
+      "phone": "(73) 99113-5565"
+    },
+    "-Okd5uU1U6112QcMAmfX": {
+      "createdAt": "2026-02-04T14:43:24.372Z",
+      "ministry": "Multimídia / Transmissão",
+      "name": "Enthony",
+      "phone": "(73) 99845-4890"
+    },
+    "-Okd5zTtwA_XYvbfaaYT": {
+      "createdAt": "2026-02-04T14:43:44.843Z",
+      "ministry": "Multimídia / Transmissão",
+      "name": "Pedro",
+      "phone": "(73) 99816-1046"
+    },
+    "-Okd63Kqhf8qoWL6R5af": {
+      "createdAt": "2026-02-04T14:44:04.743Z",
+      "ministry": "Multimídia / Transmissão",
+      "name": "Matheus",
+      "phone": "(73) 98812-5349"
+    },
+    "-OkjugmfpSxk1-TufLAi": {
+      "createdAt": "2026-02-05T22:27:23.480Z",
+      "ministry": "Multimídia / Story Maker",
+      "name": "Gabriel ",
+      "phone": ""
+    },
+    "-Okjuo2wPay_qI8oN16f": {
+      "createdAt": "2026-02-05T22:27:53.257Z",
+      "ministry": "Multimídia / Projeção",
+      "name": "Larissa ",
+      "phone": ""
+    },
+    "-OkjuqDxUmkYr11mhwm3": {
+      "createdAt": "2026-02-05T22:28:02.154Z",
+      "ministry": "Multimídia / Projeção",
+      "name": "Thaila",
+      "phone": ""
+    },
+    "-OkjusHxbnbx4RVjS0oP": {
+      "createdAt": "2026-02-05T22:28:10.602Z",
+      "ministry": "Multimídia / Projeção",
+      "name": "Mylena ",
+      "phone": ""
+    },
+    "-OkjuvQTIuSlh7qJoJ6H": {
+      "createdAt": "2026-02-05T22:28:23.435Z",
+      "ministry": "Multimídia / Projeção",
+      "name": "Janine ",
+      "phone": ""
+    },
+    "-OkjuxrZWoEt7NPb3t7e": {
+      "createdAt": "2026-02-05T22:28:33.425Z",
+      "ministry": "Multimídia / Story Maker",
+      "name": "Grissi ",
+      "phone": ""
+    },
+    "-OkjuzydcqynOvfok9JA": {
+      "createdAt": "2026-02-05T22:28:42.069Z",
+      "ministry": "Multimídia / Story Maker",
+      "name": "Mariana ",
+      "phone": ""
+    }
+  },
+  "rosters": {
+    "-OkjvZVyW964nkWAHWbI": {
+      "authorId": "dBtBzn5DIiW1pHiemt1qcer9bO12",
+      "createdAt": "2026-02-05T22:31:11.723Z",
+      "createdBy": "teste@gmail.com",
+      "ministry": "Multimídia / Projeção",
+      "month": "2026-02",
+      "shifts": [
+        {
+          "date": "01/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Larissa "
+          ]
+        },
+        {
+          "date": "05/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Larissa "
+          ]
+        },
+        {
+          "date": "08/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Mylena "
+          ]
+        },
+        {
+          "date": "12/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Mylena "
+          ]
+        },
+        {
+          "date": "15/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Janine "
+          ]
+        },
+        {
+          "date": "19/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Janine "
+          ]
+        },
+        {
+          "date": "22/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Thaila"
+          ]
+        },
+        {
+          "date": "26/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Thaila"
+          ]
+        }
+      ]
+    },
+    "-Okjy6RrHO7kLa28SYl1": {
+      "authorId": "dBtBzn5DIiW1pHiemt1qcer9bO12",
+      "createdAt": "2026-02-05T22:42:19.134Z",
+      "createdBy": "teste@gmail.com",
+      "ministry": "Multimídia / Transmissão",
+      "month": "2026-02",
+      "shifts": [
+        {
+          "date": "01/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Daniel"
+          ]
+        },
+        {
+          "date": "05/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Daniel"
+          ]
+        },
+        {
+          "date": "08/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Enthony"
+          ]
+        },
+        {
+          "date": "12/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Enthony"
+          ]
+        },
+        {
+          "date": "15/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Matheus"
+          ]
+        },
+        {
+          "date": "19/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Matheus"
+          ]
+        },
+        {
+          "date": "22/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Nick"
+          ]
+        },
+        {
+          "date": "26/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Nick"
+          ]
+        }
+      ]
+    },
+    "-OkjyGxX_kJp_sAOVjpr": {
+      "authorId": "dBtBzn5DIiW1pHiemt1qcer9bO12",
+      "createdAt": "2026-02-05T22:43:02.186Z",
+      "createdBy": "teste@gmail.com",
+      "ministry": "Multimídia / Story Maker",
+      "month": "2026-02",
+      "shifts": [
+        {
+          "date": "01/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Gabriel "
+          ]
+        },
+        {
+          "date": "05/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Gabriel "
+          ]
+        },
+        {
+          "date": "08/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Grissi "
+          ]
+        },
+        {
+          "date": "12/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Grissi "
+          ]
+        },
+        {
+          "date": "15/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Mariana "
+          ]
+        },
+        {
+          "date": "19/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Mariana "
+          ]
+        },
+        {
+          "date": "22/02/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Gabriel "
+          ]
+        },
+        {
+          "date": "26/02/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Gabriel "
+          ]
+        }
+      ]
+    },
+    "-OkjyNduhZdPeL30xUB6": {
+      "authorId": "dBtBzn5DIiW1pHiemt1qcer9bO12",
+      "createdAt": "2026-02-05T22:43:29.602Z",
+      "createdBy": "teste@gmail.com",
+      "ministry": "Multimídia / Projeção",
+      "month": "2026-03",
+      "shifts": [
+        {
+          "date": "01/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Mylena "
+          ]
+        },
+        {
+          "date": "05/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Mylena "
+          ]
+        },
+        {
+          "date": "08/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Larissa "
+          ]
+        },
+        {
+          "date": "12/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Larissa "
+          ]
+        },
+        {
+          "date": "15/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Thaila"
+          ]
+        },
+        {
+          "date": "19/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Thaila"
+          ]
+        },
+        {
+          "date": "22/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Janine "
+          ]
+        },
+        {
+          "date": "26/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Janine "
+          ]
+        },
+        {
+          "date": "29/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Projeção",
+          "team": [
+            "Mylena "
+          ]
+        }
+      ]
+    },
+    "-OkjyRDY3sukp9u5k509": {
+      "authorId": "dBtBzn5DIiW1pHiemt1qcer9bO12",
+      "createdAt": "2026-02-05T22:43:44.235Z",
+      "createdBy": "teste@gmail.com",
+      "ministry": "Multimídia / Transmissão",
+      "month": "2026-03",
+      "shifts": [
+        {
+          "date": "01/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Matheus"
+          ]
+        },
+        {
+          "date": "05/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Matheus"
+          ]
+        },
+        {
+          "date": "08/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Pedro"
+          ]
+        },
+        {
+          "date": "12/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Pedro"
+          ]
+        },
+        {
+          "date": "15/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Nick"
+          ]
+        },
+        {
+          "date": "19/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Nick"
+          ]
+        },
+        {
+          "date": "22/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Enthony"
+          ]
+        },
+        {
+          "date": "26/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Enthony"
+          ]
+        },
+        {
+          "date": "29/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Transmissão",
+          "team": [
+            "Daniel"
+          ]
+        }
+      ]
+    },
+    "-OkjyfPyHZSDWKnX0VPx": {
+      "authorId": "dBtBzn5DIiW1pHiemt1qcer9bO12",
+      "createdAt": "2026-02-05T22:44:46.470Z",
+      "createdBy": "teste@gmail.com",
+      "ministry": "Multimídia / Story Maker",
+      "month": "2026-03",
+      "shifts": [
+        {
+          "date": "01/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Mariana "
+          ]
+        },
+        {
+          "date": "05/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Mariana "
+          ]
+        },
+        {
+          "date": "08/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Gabriel "
+          ]
+        },
+        {
+          "date": "12/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Gabriel "
+          ]
+        },
+        {
+          "date": "15/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Grissi "
+          ]
+        },
+        {
+          "date": "19/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Grissi "
+          ]
+        },
+        {
+          "date": "22/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Mariana "
+          ]
+        },
+        {
+          "date": "26/03/2026",
+          "dayName": "Quinta-feira",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Mariana "
+          ]
+        },
+        {
+          "date": "29/03/2026",
+          "dayName": "Domingo",
+          "ministry": "Multimídia / Story Maker",
+          "team": [
+            "Gabriel "
+          ]
+        }
+      ]
+    }
+  },
+  "users": {
+    "cQIvk7aenHgfzg6XkPJmw9TqTML2": {
+      "createdAt": "2026-02-04T13:32:20.527Z",
+      "email": "nickdyegars@gmail.com",
+      "id": "cQIvk7aenHgfzg6XkPJmw9TqTML2",
+      "ministry": "all",
+      "name": "Pedro Henrique (Nick)",
+      "role": "admin"
+    },
+    "dBtBzn5DIiW1pHiemt1qcer9bO12": {
+      "createdAt": "2026-02-04T20:08:05.664Z",
+      "email": "teste@gmail.com",
+      "id": "dBtBzn5DIiW1pHiemt1qcer9bO12",
+      "ministry": "all",
+      "name": "Loamy",
+      "role": "admin"
+    }
+  }
+}

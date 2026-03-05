@@ -1,0 +1,117 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"] // Ativa o suporte aos schemas auth, app e roster
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["auth", "app", "roster"]
+}
+
+// ==========================================
+// SCHEMA: auth
+// ==========================================
+
+model User {
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email             String    @unique
+  password_hash     String
+  user_level        Int       @default(2) // 0: Admin, 1: Sub-Admin, 2: User
+  is_active         Boolean   @default(true)
+  is_email_verified Boolean   @default(false)
+  created_at        DateTime  @default(now()) @db.Timestamptz(3)
+  admin_id          String?
+  ministry_access   String?   @default("all")
+
+  profile           UserProfile? // Relação 1:1 com o perfil
+  schedules         Schedule[]   // Escalas que este usuário criou
+
+  @@map("users")
+  @@schema("auth")
+}
+
+// ==========================================
+// SCHEMA: app
+// ==========================================
+
+model Ministry {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique @db.VarChar(100)
+  
+  members   Member[]
+  schedules Schedule[]
+
+  @@map("ministries")
+  @@schema("app")
+}
+
+model UserProfile {
+  user_id    String    @id @db.Uuid
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  full_name  String?   @db.VarChar(255)
+  phone      String?   @db.VarChar(20)
+  birth_date DateTime? @db.Date
+  avatar_url String?
+  updated_at DateTime? @default(now()) @db.Timestamptz(3)
+
+  @@map("user_profiles")
+  @@schema("app")
+}
+
+model Member {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String    @db.VarChar(255)
+  phone       String?   @db.VarChar(20)
+  ministry_id Int?
+  ministry    Ministry? @relation(fields: [ministry_id], references: [id], onDelete: SetNull)
+  created_at  DateTime? @default(now()) @db.Timestamptz(3)
+  
+  shifts      ShiftAssignment[]
+
+  @@map("members")
+  @@schema("app")
+}
+
+// ==========================================
+// SCHEMA: roster
+// ==========================================
+
+model Schedule {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  month_reference String    @db.VarChar(7)
+  ministry_id     Int?
+  ministry        Ministry? @relation(fields: [ministry_id], references: [id], onDelete: Cascade)
+  author_id       String?   @db.Uuid
+  author          User?     @relation(fields: [author_id], references: [id])
+  created_at      DateTime? @default(now()) @db.Timestamptz(3)
+  
+  shifts          Shift[]
+
+  @@map("schedules")
+  @@schema("roster")
+}
+
+model Shift {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  schedule_id String?  @db.Uuid
+  schedule    Schedule? @relation(fields: [schedule_id], references: [id], onDelete: Cascade)
+  shift_date  DateTime @db.Date
+  day_name    String?  @db.VarChar(20)
+  
+  members     ShiftAssignment[]
+
+  @@map("shifts")
+  @@schema("roster")
+}
+
+model ShiftAssignment {
+  shift_id  String @db.Uuid
+  shift     Shift  @relation(fields: [shift_id], references: [id], onDelete: Cascade)
+  member_id String @db.Uuid
+  member    Member @relation(fields: [member_id], references: [id], onDelete: Cascade)
+
+  @@id([shift_id, member_id])
+  @@map("shift_assignments")
+  @@schema("roster")
+}

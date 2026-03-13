@@ -73,6 +73,134 @@ model Member {
   @@schema("app")
 }
 
+model SiteAnalytics {
+  id        String   @id @default(uuid())
+  action    String   // Ex: "VISIT", "WHATSAPP_CLICK", "INSTAGRAM_CLICK"
+  page      String?  // Ex: "Home", "Contactos"
+  createdAt DateTime @default(now())
+
+  @@map("site_analytics")
+  @@schema("app") 
+}
+
+// ==========================================
+// MÓDULO: CMS (LANDING PAGE) - SCHEMA: app
+// ==========================================
+
+model SiteAbout {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  title        String    @default("Sobre a Igreja Batista Novo Horizonte") @db.VarChar(255)
+  content      String    @db.Text
+  image_url    String?
+  stat_members String?   @default("600+") @db.VarChar(50)
+  stat_years   String?   @default("52+") @db.VarChar(50)
+  stat_cells   String?   @default("25") @db.VarChar(50)
+  updated_at   DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("site_about")
+  @@schema("app")
+}
+
+model SiteProgram {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  title       String    @db.VarChar(255)
+  day         String    @db.VarChar(50)
+  time        String    @db.VarChar(20)
+  description String    @db.Text
+  image_url   String?
+  is_active   Boolean   @default(true)
+  order       Int       @default(0)
+  created_at  DateTime? @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("site_programs")
+  @@schema("app")
+}
+
+model SitePastor {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String    @db.VarChar(255)
+  role        String    @db.VarChar(255)
+  bio         String    @db.Text
+  image_url   String?
+  social_link String?
+  is_active   Boolean   @default(true)
+  order       Int       @default(0)
+  created_at  DateTime? @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("site_pastors")
+  @@schema("app")
+}
+
+model SiteMinistry {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String    @db.VarChar(255)
+  description String    @db.Text
+  image_url   String?
+  tags        String[] @default([])
+  is_active   Boolean   @default(true)
+  order       Int       @default(0)
+  created_at  DateTime? @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("site_ministries")
+  @@schema("app")
+}
+
+model SiteCell {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name         String    @db.VarChar(255)
+  leader       String    @db.VarChar(255)
+  day          String    @db.VarChar(50)
+  time         String    @db.VarChar(20)
+  location     String    @db.VarChar(255)
+  audience     String?   @db.VarChar(100)
+  contact_link String?   @db.Text
+  is_active    Boolean   @default(true)
+  order        Int       @default(0)
+  created_at   DateTime? @default(now()) @db.Timestamptz(3)
+  updated_at   DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+  image_url    String?
+
+  @@map("site_cells")
+  @@schema("app")
+}
+
+model SiteProject {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  title       String    @db.VarChar(255)
+  description String    @db.Text
+  image_url   String?
+  responsible String?
+  tags        String[] @default([])
+  is_active   Boolean   @default(true)
+  order       Int       @default(0)
+  created_at  DateTime? @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("site_projects")
+  @@schema("app")
+}
+
+model SiteContact {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  address        String?   @db.Text
+  phone_1_name   String?   @default("Josimar") @db.VarChar(100)
+  phone_1_number String?   @db.VarChar(50)
+  phone_2_name   String?   @default("Diogenes") @db.VarChar(100)
+  phone_2_number String?   @db.VarChar(50)
+  email          String?   @db.VarChar(255)
+  facebook_link  String?   @db.Text
+  instagram_link String?   @db.Text
+  youtube_link   String?   @db.Text
+  service_hours  String?   @db.Text
+  updated_at     DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("site_contacts")
+  @@schema("app")
+}
+
 // ==========================================
 // SCHEMA: roster
 // ==========================================
@@ -93,11 +221,11 @@ model Schedule {
 }
 
 model Shift {
-  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  schedule_id String?  @db.Uuid
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  schedule_id String?   @db.Uuid
   schedule    Schedule? @relation(fields: [schedule_id], references: [id], onDelete: Cascade)
-  shift_date  DateTime @db.Date
-  day_name    String?  @db.VarChar(20)
+  shift_date  DateTime  @db.Date
+  day_name    String?   @db.VarChar(20)
   
   members     ShiftAssignment[]
 
@@ -114,14 +242,4 @@ model ShiftAssignment {
   @@id([shift_id, member_id])
   @@map("shift_assignments")
   @@schema("roster")
-}
-
-model SiteAnalytics {
-  id        String   @id @default(uuid())
-  action    String   // Ex: "VISIT", "WHATSAPP_CLICK", "INSTAGRAM_CLICK"
-  page      String?  // Ex: "Home", "Contactos"
-  createdAt DateTime @default(now())
-
-  @@map("site_analytics")
-  @@schema("app") // <-- Só faltava esta linha!
 }

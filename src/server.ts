@@ -5,6 +5,9 @@ import { authRoutes } from './modules/auth/auth.routes.js';
 import { rosterRoutes } from './modules/rosters/roster.routes.js';
 import { memberRoutes } from './modules/members/member.routes.js';
 import { analyticsRoutes } from './modules/analytics/analytics.routes.js';
+import { cmsRoutes } from './modules/cms/cms.routes.js';
+import multipart from '@fastify/multipart';
+import { setupMinioBucket } from './shared/storage/minio.js';
 
 const app = Fastify({ logger: true });
 
@@ -19,11 +22,18 @@ app.register(fastifyJwt, {
   secret: process.env.JWT_SECRET || 'fallback-secret-dev'
 });
 
+app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB max
+
+app.addHook('onReady', async () => {
+    await setupMinioBucket();
+});
+
 // Registra as nossas rotas de autenticação (ficarão em /auth/login)
 app.register(authRoutes, { prefix: '/auth' });
 app.register(rosterRoutes);
 app.register(memberRoutes);
 app.register(analyticsRoutes, { prefix: '/analytics' });
+app.register(cmsRoutes);
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

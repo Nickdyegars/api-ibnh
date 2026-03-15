@@ -8,6 +8,8 @@ import { analyticsRoutes } from './modules/analytics/analytics.routes.js';
 import { cmsRoutes } from './modules/cms/cms.routes.js';
 import multipart from '@fastify/multipart';
 import { setupMinioBucket } from './shared/storage/minio.js';
+import { eventRoutes } from './modules/events/event.routes.js';
+import { constructionRoutes } from './modules/construction/construction.routes.js';
 
 const app = Fastify({ logger: true });
 
@@ -34,6 +36,8 @@ app.register(rosterRoutes);
 app.register(memberRoutes);
 app.register(analyticsRoutes, { prefix: '/analytics' });
 app.register(cmsRoutes);
+app.register(eventRoutes); // Registra as rotas de eventos
+app.register(constructionRoutes);
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

@@ -92,6 +92,7 @@ model SiteAbout {
   title        String    @default("Sobre a Igreja Batista Novo Horizonte") @db.VarChar(255)
   content      String    @db.Text
   image_url    String?
+  hero_image_url String?
   stat_members String?   @default("600+") @db.VarChar(50)
   stat_years   String?   @default("52+") @db.VarChar(50)
   stat_cells   String?   @default("25") @db.VarChar(50)
@@ -154,7 +155,7 @@ model SiteCell {
   leader       String    @db.VarChar(255)
   day          String    @db.VarChar(50)
   time         String    @db.VarChar(20)
-  location     String    @db.VarChar(255)
+  location     String    @db.VarChar(255  )
   audience     String?   @db.VarChar(100)
   contact_link String?   @db.Text
   is_active    Boolean   @default(true)
@@ -201,6 +202,24 @@ model SiteContact {
   @@schema("app")
 }
 
+model SiteEvent {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  title       String    @db.VarChar(255)
+  description String    @db.Text
+  event_date  DateTime  @db.Timestamptz(3) // 👈 Guarda a data real do evento
+  end_date    DateTime? @db.Timestamptz(3)
+  button_text String?   @default("Saber Mais") @db.VarChar(50)
+  link_url    String?   @db.Text
+  image_url   String?
+  is_active   Boolean   @default(true)
+  order       Int       @default(0)
+  created_at  DateTime? @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("site_events")
+  @@schema("app")
+}
+
 // ==========================================
 // SCHEMA: roster
 // ==========================================
@@ -242,4 +261,26 @@ model ShiftAssignment {
   @@id([shift_id, member_id])
   @@map("shift_assignments")
   @@schema("roster")
+}
+
+model SiteConstructionInfo {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  pix_key         String?   @db.VarChar(255) // Aqui vai o CNPJ ou a chave PIX
+  qr_code_url     String?   @db.Text         // A imagem do QR Code gerado pelo banco
+  instagram_url   String?   @db.Text         // O link do "Saiba Mais" para o Instagram
+  updated_at      DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("site_construction_info")
+  @@schema("app")
+}
+
+// 2. Tabela para as fotos da obra (Carrossel)
+model SiteConstructionPhoto {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  image_url  String    @db.Text
+  order      Int       @default(0)
+  created_at DateTime? @default(now()) @db.Timestamptz(3)
+
+  @@map("site_construction_photos")
+  @@schema("app")
 }

@@ -1,30 +1,47 @@
-# 1. Usa uma imagem oficial do Node.js (versão slim para ser mais leve)
-FROM node:20-slim
+# ==========================================
+# ESTÁGIO 1: CONSTRUTOR (Builder)
+# ==========================================
+FROM node:20-slim AS builder
 
-# 2. Instala o OpenSSL (Obrigatório para o Prisma rodar no Linux)
-RUN apt-get update -y && apt-get install -y openssl
-
-# 3. Define a pasta de trabalho dentro do container
 WORKDIR /app
 
-# 4. Copia apenas os arquivos de dependências primeiro (otimiza o cache do Docker)
-COPY package.json package-lock.json* ./
+# Instala o OpenSSL para o Prisma conseguir gerar os binários
+RUN apt-get update -y && apt-get install -y openssl
 
-# 5. Instala as dependências
+# Copia dependências e instala TUDO (incluindo devDependencies)
+COPY package*.json ./
+COPY prisma ./prisma/
 RUN npm install
 
-# 6. Copia a pasta do Prisma e gera o cliente do banco de dados
-COPY prisma ./prisma
-RUN npx prisma generate
-
-# 7. Copia o restante do código do projeto
+# Copia o resto do código e faz o build
 COPY . .
-
-# 8. Faz o build do TypeScript para JavaScript (Se você usar tsup ou tsc)
+RUN npx prisma generate
 RUN npm run build
 
-# 9. Expõe a porta que o Fastify vai rodar
-EXPOSE 3333
 
-# 10. Comando para iniciar o servidor em produção
+# ==========================================
+# ESTÁGIO 2: PRODUÇÃO (A Imagem Final Leve)
+# ==========================================
+FROM node:20-slim
+
+WORKDIR /app
+
+# Instala o OpenSSL, mas limpa o "lixo" do apt-get logo a seguir para poupar espaço
+RUN apt-get update -y && apt-get install -y openssl && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copia APENAS os ficheiros estritamente necessários
+COPY package*.json ./
+COPY prisma ./prisma/
+
+# Instala APENAS dependências de produção (ignora TypeScript, etc)
+RUN npm install --omit=dev
+
+# Gera o cliente do Prisma otimizado para produção
+RUN npx prisma generate
+
+# Copia a pasta /dist que foi compilada no Estágio 1
+COPY --from=builder /app/dist ./dist
+
+# Expõe a porta e inicia o servidor
+EXPOSE 3333
 CMD ["npm", "start"]

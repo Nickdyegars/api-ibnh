@@ -5,6 +5,9 @@ export const constructionInfoSchema = z.object({
   pix_key: z.string().optional().nullable(),
   qr_code_url: z.string().optional().nullable(),
   instagram_url: z.string().optional().nullable(),
+  is_active: z.boolean().optional(),
+  description: z.string().optional(),
+  verse_text: z.string().optional(),
 });
 
 export type ConstructionInfoType = z.infer<typeof constructionInfoSchema>;

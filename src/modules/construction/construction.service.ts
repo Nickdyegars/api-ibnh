@@ -3,7 +3,7 @@ import { prisma } from '../../shared/database/prisma.js';
 import { ConstructionInfoType } from './construction.schemas.js';
 
 export class ConstructionService {
-  
+
   // === INFORMAÇÕES GERAIS (PIX, LINKS) ===
   async getInfo() {
     let info = await prisma.siteConstructionInfo.findFirst();
@@ -16,12 +16,17 @@ export class ConstructionService {
 
   async updateInfo(data: ConstructionInfoType) {
     const info = await this.getInfo();
-    
+
     // Tratamento rigoroso do TypeScript para evitar enviar "undefined"
     const updateData: any = {};
     if (data.pix_key !== undefined) updateData.pix_key = data.pix_key;
     if (data.qr_code_url !== undefined) updateData.qr_code_url = data.qr_code_url;
     if (data.instagram_url !== undefined) updateData.instagram_url = data.instagram_url;
+    if (data.is_active !== undefined) updateData.is_active = data.is_active;
+
+    // 👇 ADICIONE ESTAS DUAS LINHAS 👇
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.verse_text !== undefined) updateData.verse_text = data.verse_text;
 
     return await prisma.siteConstructionInfo.update({
       where: { id: info.id },
@@ -48,4 +53,11 @@ export class ConstructionService {
     });
     return { success: true };
   }
+
+  async updatePhotoOrder(id: string, newOrder: number) {
+  return await prisma.siteConstructionPhoto.update({
+    where: { id },
+    data: { order: newOrder }
+  });
+}
 }

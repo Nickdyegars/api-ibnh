@@ -1,6 +1,6 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthService } from './auth.service.js';
-import { registerSchema, loginSchema } from './auth.schemas.js';
+import { registerSchema, loginSchema, updateUserSchema } from './auth.schemas.js';
 
 const authService = new AuthService();
 
@@ -62,6 +62,45 @@ export class AuthController {
         return reply.status(400).send({ error: error.errors[0].message });
       }
       return reply.status(401).send({ error: error.message });
+    }
+  }
+
+  async getUsers(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const users = await authService.getUsers();
+      return reply.send(users);
+    } catch (error: any) {
+      return reply.status(500).send({ error: 'Erro ao buscar usuários do banco de dados.' });
+    }
+  }
+
+  async updateUser(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      // Pega o ID que vem na URL (ex: /users/123)
+      const { id } = request.params as { id: string };
+      
+      // Valida os campos usando o nosso novo Schema
+      const data = updateUserSchema.parse(request.body);
+      
+      const user = await authService.updateUser(id, data);
+      
+      return reply.send({ message: 'Usuário atualizado com sucesso!', user });
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return reply.status(400).send({ error: error.errors[0].message });
+      }
+      return reply.status(400).send({ error: error.message });
+    }
+  }
+
+  async deleteUser(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { id } = request.params as { id: string };
+      await authService.deleteUser(id);
+      
+      return reply.send({ message: 'Usuário apagado com sucesso!' });
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
     }
   }
 }

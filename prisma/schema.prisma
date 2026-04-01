@@ -264,11 +264,17 @@ model ShiftAssignment {
 }
 
 model SiteConstructionInfo {
-  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  pix_key         String?   @db.VarChar(255) // Aqui vai o CNPJ ou a chave PIX
-  qr_code_url     String?   @db.Text         // A imagem do QR Code gerado pelo banco
-  instagram_url   String?   @db.Text         // O link do "Saiba Mais" para o Instagram
-  updated_at      DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  pix_key       String?   @db.VarChar(255) // Aqui vai o CNPJ ou a chave PIX
+  qr_code_url   String?   @db.Text         // A imagem do QR Code gerado pelo banco
+  instagram_url String?   @db.Text         // O link do "Saiba Mais" para o Instagram
+  
+  // 👇 AQUI ESTÁ O NOSSO SWITCH 👇
+  is_active     Boolean   @default(false)  // Controla se a seção aparece no site ou não
+  description   String?   @db.Text // Para o texto: "A Igreja Batista está a crescer..."
+  verse_text    String?   @db.Text
+  
+  updated_at    DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
 
   @@map("site_construction_info")
   @@schema("app")
@@ -282,5 +288,24 @@ model SiteConstructionPhoto {
   created_at DateTime? @default(now()) @db.Timestamptz(3)
 
   @@map("site_construction_photos")
+  @@schema("app")
+}
+
+// ==========================================
+// FINANCEIRO (DÍZIMOS E OFERTAS)
+// ==========================================
+
+model FinancialEntry {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  type           String    @db.VarChar(50)  // "DIZIMO" ou "OFERTA"
+  value          Decimal   @db.Decimal(10, 2) 
+  entry_date     DateTime  @db.Date           // Data real do culto/entrega
+  payment_method String    @db.VarChar(50)  // "PIX", "DINHEIRO", "CARTAO", "TRANSFERENCIA"
+  member_name    String?   @db.VarChar(255) // Opcional
+  
+  created_at     DateTime? @default(now()) @db.Timestamptz(3) // Quando foi digitado no sistema
+  updated_at     DateTime? @updatedAt @db.Timestamptz(3)      // Se alguém editar para corrigir um erro, muda aqui
+
+  @@map("financial_entries")
   @@schema("app")
 }

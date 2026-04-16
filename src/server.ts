@@ -11,11 +11,13 @@ import { setupMinioBucket } from './shared/storage/minio.js';
 import { eventRoutes } from './modules/events/event.routes.js';
 import { constructionRoutes } from './modules/construction/construction.routes.js';
 import { financeRoutes } from './modules/finance/finance.routes.js';
+import { communityBusinessRoutes } from './modules/community-business/community-business.routes.js';
+import { communityBusinessCategoryRoutes } from './modules/community-business-category/community-business-category.routes.js';
 
 const app = Fastify({ logger: true });
 
-app.register(cors, { 
-  origin: '*', // Permite que o React acesse a API
+app.register(cors, {
+  origin: true, // Permite que o React acesse a API
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Libera os métodos
   allowedHeaders: ['Content-Type', 'Authorization'] // Libera o envio do Token
 });
@@ -25,10 +27,14 @@ app.register(fastifyJwt, {
   secret: process.env.JWT_SECRET || 'fallback-secret-dev'
 });
 
-app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB max
+app.register(multipart, {
+  limits: {
+    fileSize: 15 * 1024 * 1024
+  }
+}); // 5MB max
 
 app.addHook('onReady', async () => {
-    await setupMinioBucket();
+  await setupMinioBucket();
 });
 
 // Registra as nossas rotas de autenticação (ficarão em /auth/login)
@@ -40,6 +46,8 @@ app.register(cmsRoutes);
 app.register(eventRoutes); // Registra as rotas de eventos
 app.register(constructionRoutes);
 app.register(financeRoutes);
+app.register(communityBusinessRoutes);
+app.register(communityBusinessCategoryRoutes);
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

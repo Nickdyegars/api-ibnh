@@ -349,3 +349,16 @@ model CommunityBusinessCategory {
   @@map("community_categories")
   @@schema("app")
 }
+
+model LandingPageConfig {
+  id                 String   @id @default(uuid())
+  
+  // Configurações do Guia de Empreendedores
+  business_form_url  String?  @db.Text
+  show_business_form Boolean  @default(true)
+
+  updated_at         DateTime @updatedAt
+  
+  @@map("landing_page_configs")
+  @@schema("app")
+}

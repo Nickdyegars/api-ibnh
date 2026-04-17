@@ -13,6 +13,7 @@ import { constructionRoutes } from './modules/construction/construction.routes.j
 import { financeRoutes } from './modules/finance/finance.routes.js';
 import { communityBusinessRoutes } from './modules/community-business/community-business.routes.js';
 import { communityBusinessCategoryRoutes } from './modules/community-business-category/community-business-category.routes.js';
+import { landingConfigRoutes } from './modules/landing-config/landing-config.routes.js';
 
 const app = Fastify({ logger: true });
 
@@ -48,6 +49,7 @@ app.register(constructionRoutes);
 app.register(financeRoutes);
 app.register(communityBusinessRoutes);
 app.register(communityBusinessCategoryRoutes);
+app.register(landingConfigRoutes);
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

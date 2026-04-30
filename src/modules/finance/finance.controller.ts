@@ -1,7 +1,7 @@
 // src/modules/finance/finance.controller.ts
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { FinanceService } from './finance.service.js';
-import { financeSchema } from './finance.schemas.js';
+import { financeSchema, expenseSchema } from './finance.schemas.js';
 
 const financeService = new FinanceService();
 
@@ -43,6 +43,79 @@ export class FinanceController {
       return reply.send({ message: 'Registro apagado com sucesso' });
     } catch (error) {
       return reply.status(400).send({ error: 'Erro ao apagar registro' });
+    }
+  }
+
+  // --- HANDLERS DE SAÍDAS ---
+  async getAllExpenses(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const expenses = await financeService.getAllExpenses();
+      return reply.send(expenses);
+    } catch (error) {
+      return reply.status(500).send({ error: 'Erro ao buscar despesas.' });
+    }
+  }
+
+  async createExpense(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const data = expenseSchema.parse(request.body);
+      const newExpense = await financeService.createExpense(data);
+      return reply.status(201).send(newExpense);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message || 'Erro de validação' });
+    }
+  }
+
+  async updateExpense(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { id } = request.params as { id: string };
+      const data = expenseSchema.parse(request.body);
+      const updated = await financeService.updateExpense(id, data);
+      return reply.send(updated);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  }
+
+  async deleteExpense(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { id } = request.params as { id: string };
+      await financeService.deleteExpense(id);
+      return reply.send({ message: 'Despesa apagada com sucesso' });
+    } catch (error) {
+      return reply.status(400).send({ error: 'Erro ao apagar despesa' });
+    }
+  }
+
+  // --- HANDLERS DE CATEGORIAS ---
+  async getCategories(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const categories = await financeService.getCategories();
+      return reply.send(categories);
+    } catch (error) {
+      return reply.status(500).send({ error: 'Erro ao buscar categorias.' });
+    }
+  }
+
+  async createCategory(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { name } = request.body as { name: string };
+      if (!name || name.trim() === '') throw new Error('Nome da categoria é obrigatório');
+      
+      const newCategory = await financeService.createCategory(name);
+      return reply.status(201).send(newCategory);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message || 'Erro ao criar categoria' });
+    }
+  }
+
+  async deleteCategory(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { id } = request.params as { id: string };
+      await financeService.deleteCategory(id);
+      return reply.send({ message: 'Categoria apagada' });
+    } catch (error) {
+      return reply.status(400).send({ error: 'Erro ao apagar categoria' });
     }
   }
 }

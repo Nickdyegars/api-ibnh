@@ -14,6 +14,7 @@ import { financeRoutes } from './modules/finance/finance.routes.js';
 import { communityBusinessRoutes } from './modules/community-business/community-business.routes.js';
 import { communityBusinessCategoryRoutes } from './modules/community-business-category/community-business-category.routes.js';
 import { landingConfigRoutes } from './modules/landing-config/landing-config.routes.js';
+import { ecdRoutes } from './modules/ecd/ecd.routes.js';
 
 const app = Fastify({ logger: true });
 
@@ -50,6 +51,7 @@ app.register(financeRoutes);
 app.register(communityBusinessRoutes);
 app.register(communityBusinessCategoryRoutes);
 app.register(landingConfigRoutes);
+app.register(ecdRoutes); // Registra as rotas do ECD
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

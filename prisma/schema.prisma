@@ -483,3 +483,21 @@ model EcdRegistration {
   @@map("ecd_registrations")
   @@schema("app")
 }
+
+model RepertoireSong {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  title        String
+  category     String    // Ex: "DOMINGO", "QUINTA-FEIRA"
+  tone_fem     String?   // Tom Feminino (Opcional)
+  tone_masc    String?   // Tom Masculino (Opcional)
+  
+  link_vs      String    // OBRIGATÓRIO (Drive/Multitrack)
+  link_youtube String?   // (Opcional)
+  link_spotify String?   // (Opcional)
+  link_cifra   String?   // (Opcional)
+  
+  created_at   DateTime? @default(now()) @db.Timestamptz(3)
+
+  @@map("repertoire_songs")
+  @@schema("app")
+}

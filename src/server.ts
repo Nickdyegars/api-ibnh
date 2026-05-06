@@ -15,12 +15,13 @@ import { communityBusinessRoutes } from './modules/community-business/community-
 import { communityBusinessCategoryRoutes } from './modules/community-business-category/community-business-category.routes.js';
 import { landingConfigRoutes } from './modules/landing-config/landing-config.routes.js';
 import { ecdRoutes } from './modules/ecd/ecd.routes.js';
+import { repertorioRoutes } from './modules/repertorio/repertorio.routes.js';
 
 const app = Fastify({ logger: true });
 
 app.register(cors, {
   origin: true, // Permite que o React acesse a API
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Libera os métodos
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Libera os métodos
   allowedHeaders: ['Content-Type', 'Authorization'] // Libera o envio do Token
 });
 
@@ -52,6 +53,7 @@ app.register(communityBusinessRoutes);
 app.register(communityBusinessCategoryRoutes);
 app.register(landingConfigRoutes);
 app.register(ecdRoutes); // Registra as rotas do ECD
+app.register(repertorioRoutes); // Registra as rotas do Repertório
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

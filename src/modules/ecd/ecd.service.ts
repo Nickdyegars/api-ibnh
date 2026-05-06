@@ -1,35 +1,50 @@
 // src/modules/ecd/ecd.service.ts
-import { prisma } from '../../shared/database/prisma.js'; // Ajuste o caminho se necessário
+import { prisma } from '../../shared/database/prisma.js';
 import { RegisterEcdType } from './ecd.schemas.js';
+import { uploadImage } from '../../shared/storage/minio.js'; // 👈 Importação do MinIO adicionada
 
 export class EcdService {
 
-  async createRegistration(data: RegisterEcdType) {
+  // 👇 Agora recebe também a variável files 👇
+  async createRegistration(data: RegisterEcdType, files: any) {
     // 1. Verificar se o Token existe e se AINDA É VÁLIDO
     const tokenRecord = await prisma.ecdToken.findUnique({
       where: { token_code: data.token }
     });
 
-    if (!tokenRecord) {
-      throw new Error("TOKEN_NOT_FOUND");
+    if (!tokenRecord) throw new Error("TOKEN_NOT_FOUND");
+    if (tokenRecord.is_used) throw new Error("TOKEN_ALREADY_USED");
+
+    // 2. UPLOAD DAS FOTOS PARA O MINIO
+    let profileUrl = null;
+    let receiptUrl = null;
+
+    if (files.profilePhoto) {
+      profileUrl = await uploadImage(
+        files.profilePhoto.filename,
+        files.profilePhoto.buffer,
+        files.profilePhoto.mimetype,
+        'ecd/profiles' // Salva na pasta ecd/profiles no bucket
+      );
     }
 
-    if (tokenRecord.is_used) {
-      throw new Error("TOKEN_ALREADY_USED");
+    if (files.receiptPhoto) {
+      receiptUrl = await uploadImage(
+        files.receiptPhoto.filename,
+        files.receiptPhoto.buffer,
+        files.receiptPhoto.mimetype,
+        'ecd/receipts' // Salva na pasta ecd/receipts no bucket
+      );
     }
 
-    // 🔴 [ESPAÇO RESERVADO PARA AS FOTOS NO PRÓXIMO PASSO] 🔴
-    const tempProfileUrl = "https://via.placeholder.com/150";
-    const tempReceiptUrl = "https://via.placeholder.com/400x600";
-
-    // 2. Transação do Prisma
+    // 3. Transação do Prisma
     const result = await prisma.$transaction(async (tx) => {
-      
+
       // A) Salva a Ficha
       const registration = await tx.ecdRegistration.create({
         data: {
           full_name: data.fullName,
-          nickname: data.nickname ?? null, // 👈 Força null em vez de undefined
+          nickname: data.nickname ?? null,
           phone: data.phone,
           gender: data.gender,
           age: data.age,
@@ -51,9 +66,10 @@ export class EcdService {
           in_cell: data.inCell,
           cell_leader_name: data.cellLeaderName ?? null,
           invited_by: data.invitedBy ?? null,
-          
-          profile_photo_url: tempProfileUrl,
-          receipt_photo_url: tempReceiptUrl,
+
+          // URLs reais do MinIO
+          profile_photo_url: profileUrl,
+          receipt_photo_url: receiptUrl,
 
           ficha_type: tokenRecord.token_type,
           leader_id: tokenRecord.leader_id,
@@ -86,27 +102,24 @@ export class EcdService {
     return result;
   }
 
-  // Busca todos os líderes e os seus tokens para a Tabela 1
   async getLeaders() {
     return await prisma.ecdLeader.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        tokens: true // Traz os links gerados junto com o líder
+        tokens: true
       }
     });
   }
 
-  // Busca todos os inscritos para a Tabela 2
   async getRegistrations() {
     return await prisma.ecdRegistration.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        leader: { select: { name: true } } // Traz o nome do líder responsável
+        leader: { select: { name: true } }
       }
     });
   }
 
-  // Cria um novo líder e gera a cota de links (Tokens)
   async createLeaderWithTokens(name: string, yellowSlots: number, greenSlots: number) {
     const leader = await prisma.ecdLeader.create({
       data: {
@@ -116,23 +129,163 @@ export class EcdService {
       }
     });
 
-    // Gera os Tokens Amarelos
     const yellowTokens = Array.from({ length: yellowSlots }).map(() => ({
       leader_id: leader.id,
       token_type: 'AMARELA'
     }));
 
-    // Gera os Tokens Verdes
     const greenTokens = Array.from({ length: greenSlots }).map(() => ({
       leader_id: leader.id,
       token_type: 'VERDE'
     }));
 
-    // Salva tudo no banco de uma vez
     await prisma.ecdToken.createMany({
       data: [...yellowTokens, ...greenTokens]
     });
 
     return leader;
+  }
+
+  async validateToken(tokenCode: string) {
+    const token = await prisma.ecdToken.findUnique({
+      where: { token_code: tokenCode },
+      include: { leader: true }
+    });
+
+    if (!token) throw new Error("TOKEN_NOT_FOUND");
+    if (token.is_used) throw new Error("TOKEN_ALREADY_USED");
+
+    return {
+      isValid: true,
+      tokenType: token.token_type,
+      leaderName: token.leader.name
+    };
+  }
+
+  async updatePaymentStatus(id: string, status: string) {
+    return await prisma.ecdRegistration.update({
+      where: { id },
+      data: { payment_status: status }
+    });
+  }
+
+  async updateLeader(id: string, name: string, yellowSlots: number, greenSlots: number) {
+    // 1. Busca o líder atual com todos os seus tokens
+    const leader = await prisma.ecdLeader.findUnique({
+      where: { id },
+      include: { tokens: true }
+    });
+
+    if (!leader) throw new Error("Líder não encontrado.");
+
+    // 2. Trava de segurança: Não pode reduzir a cota para um número menor do que o já utilizado
+    if (yellowSlots < leader.used_yellow_slots) {
+      throw new Error(`Não é possível reduzir fichas amarelas. Ele já utilizou ${leader.used_yellow_slots}.`);
+    }
+    if (greenSlots < leader.used_green_slots) {
+      throw new Error(`Não é possível reduzir fichas verdes. Ele já utilizou ${leader.used_green_slots}.`);
+    }
+
+    const yellowDiff = yellowSlots - leader.total_yellow_slots;
+    const greenDiff = greenSlots - leader.total_green_slots;
+
+    // 3. Transação para atualizar os dados e reajustar os tokens (Links)
+    return await prisma.$transaction(async (tx) => {
+
+      const updatedLeader = await tx.ecdLeader.update({
+        where: { id },
+        data: {
+          name,
+          total_yellow_slots: yellowSlots,
+          total_green_slots: greenSlots
+        }
+      });
+
+      // 4. Ajuste das Fichas Amarelas (Cria ou Deleta tokens não usados)
+      if (yellowDiff > 0) {
+        const newTokens = Array.from({ length: yellowDiff }).map(() => ({ leader_id: id, token_type: 'AMARELA' }));
+        await tx.ecdToken.createMany({ data: newTokens });
+      } else if (yellowDiff < 0) {
+        const unusedTokens = leader.tokens.filter(t => t.token_type === 'AMARELA' && !t.is_used);
+        const tokensToDelete = unusedTokens.slice(0, Math.abs(yellowDiff)).map(t => t.id);
+        await tx.ecdToken.deleteMany({ where: { id: { in: tokensToDelete } } });
+      }
+
+      // 5. Ajuste das Fichas Verdes (Cria ou Deleta tokens não usados)
+      if (greenDiff > 0) {
+        const newTokens = Array.from({ length: greenDiff }).map(() => ({ leader_id: id, token_type: 'VERDE' }));
+        await tx.ecdToken.createMany({ data: newTokens });
+      } else if (greenDiff < 0) {
+        const unusedTokens = leader.tokens.filter(t => t.token_type === 'VERDE' && !t.is_used);
+        const tokensToDelete = unusedTokens.slice(0, Math.abs(greenDiff)).map(t => t.id);
+        await tx.ecdToken.deleteMany({ where: { id: { in: tokensToDelete } } });
+      }
+
+      return updatedLeader;
+    });
+  }
+
+  async deleteLeader(id: string) {
+    // O Prisma deletará o líder. Se houver CASCADE configurado para os tokens, eles sumirão juntos.
+    // Se ele já tiver Inscrições ligadas a ele, retornará erro de Foreign Key que trataremos no controller.
+    return await prisma.ecdLeader.delete({
+      where: { id }
+    });
+  }
+
+ async deleteRegistration(id: string) {
+    // 1. Buscamos a ficha incluindo os dados relacionados para ter certeza do que estamos apagando
+    const registration = await prisma.ecdRegistration.findUnique({
+      where: { id }
+    });
+
+    if (!registration) {
+      throw new Error("Ficha não encontrada no banco de dados.");
+    }
+
+    // 2. Transação Blindada
+    return await prisma.$transaction(async (tx) => {
+      
+      // A) Apaga a ficha PRIMEIRO (Evita travas de foreign key)
+      await tx.ecdRegistration.delete({ where: { id } });
+
+      // B) Reativa o Link (Token) SOMENTE SE ele existir
+      if (registration.token_id) {
+        const tokenExists = await tx.ecdToken.findUnique({ where: { id: registration.token_id } });
+        if (tokenExists) {
+          await tx.ecdToken.update({
+            where: { id: registration.token_id },
+            data: { is_used: false } // O link volta a ficar ativo
+          });
+        }
+      }
+
+      // C) Devolve a cota para o Líder SOMENTE SE o líder existir
+      if (registration.leader_id) {
+        const leaderExists = await tx.ecdLeader.findUnique({ where: { id: registration.leader_id } });
+        
+        if (leaderExists) {
+          if (registration.ficha_type === 'AMARELA') {
+            // Garante que não vai ficar negativo
+            if (leaderExists.used_yellow_slots > 0) {
+              await tx.ecdLeader.update({
+                where: { id: registration.leader_id },
+                data: { used_yellow_slots: { decrement: 1 } }
+              });
+            }
+          } else {
+            // Garante que não vai ficar negativo
+            if (leaderExists.used_green_slots > 0) {
+              await tx.ecdLeader.update({
+                where: { id: registration.leader_id },
+                data: { used_green_slots: { decrement: 1 } }
+              });
+            }
+          }
+        }
+      }
+
+      return { success: true };
+    });
   }
 }

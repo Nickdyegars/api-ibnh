@@ -25,5 +25,7 @@ export async function authRoutes(app: FastifyInstance) {
     childApp.get('/users', (req, rep) => authController.getUsers(req, rep));
     childApp.put('/users/:id', (req, rep) => authController.updateUser(req, rep));
     childApp.delete('/users/:id', (req, rep) => authController.deleteUser(req, rep));
+
+    childApp.post('/users/first-access-password', (req, rep) => authController.updateFirstPassword(req, rep));
   });
 }

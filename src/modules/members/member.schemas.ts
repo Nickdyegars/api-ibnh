@@ -5,6 +5,8 @@ export const memberBodySchema = z.object({
   name: z.string().min(2, "O nome deve ter pelo menos 2 caracteres"),
   phone: z.string().optional().nullable(),
   ministry: z.string().min(1, "O ministério é obrigatório"),
+  role: z.string().optional().nullable(), // 👈 NOVO CAMPO AQUI
+  team: z.string().optional().nullable()
 });
 
 export type MemberBodyType = z.infer<typeof memberBodySchema>;

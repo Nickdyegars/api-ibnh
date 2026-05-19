@@ -4,7 +4,6 @@ import { MemberBodyType } from './member.schemas.js';
 
 export class MemberService {
 
-  // Função auxiliar para achar o ID do ministério pelo nome (ou criar se não existir)
   private async getMinistryId(ministryName: string) {
     const ministry = await prisma.ministry.upsert({
       where: { name: ministryName },
@@ -20,11 +19,11 @@ export class MemberService {
       orderBy: { name: 'asc' }
     });
 
-    // Formata a resposta para ficar igual ao que vinha do Firebase
     return members.map(m => ({
       id: m.id,
       name: m.name,
       phone: m.phone,
+      role: m.role, teamName: m.team?.name, // 👈 INCLUI O ROLE NO RETORNO
       ministry: m.ministry?.name || 'Geral',
       createdAt: m.created_at
     }));
@@ -36,18 +35,19 @@ export class MemberService {
     const member = await prisma.member.create({
       data: {
         name: data.name,
-        // CORREÇÃO: Se phone for undefined, converte para null pro Prisma aceitar
         phone: data.phone ?? null,
+        role: data.role ?? null,
+        team_id: data.team ?? null,
         ministry_id: ministryId
       },
-      // Garante que o Prisma traga o objeto do ministério junto
-      include: { ministry: true }
+      include: { ministry: true, team: true}
     });
 
     return {
       id: member.id,
       name: member.name,
       phone: member.phone,
+      role: member.role, // 👈 RETORNA
       ministry: member.ministry?.name,
       createdAt: member.created_at
     };
@@ -60,29 +60,29 @@ export class MemberService {
       where: { id },
       data: {
         name: data.name,
-        // CORREÇÃO: Se phone for undefined, converte para null pro Prisma aceitar
-        phone: data.phone ?? null,
-        ministry_id: ministryId
+      phone: data.phone ?? null,
+      role: data.role ?? null,
+      team_id: data.team ?? null, // 👈 SALVAR A EQUIPA
+      ministry_id: ministryId
       },
-      // Garante que o Prisma traga o objeto do ministério junto
-      include: { ministry: true }
+      include: { ministry: true, team: true }
     });
 
     return {
       id: member.id,
       name: member.name,
       phone: member.phone,
+      role: member.role, // 👈 RETORNA
       ministry: member.ministry?.name,
       createdAt: member.created_at
     };
   }
+  
   async deleteMember(id: string) {
-    // 1. Primeiro, removemos o membro de todas as escalas em que ele estiver escalado
     await prisma.shiftAssignment.deleteMany({
       where: { member_id: id }
     });
 
-    // 2. Agora sim, apagamos o cadastro do membro em segurança
     await prisma.member.delete({
       where: { id }
     });

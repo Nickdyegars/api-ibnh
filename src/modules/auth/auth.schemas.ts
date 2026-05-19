@@ -20,3 +20,8 @@ export const updateUserSchema = z.object({
   role: z.enum(['admin', 'leader']).optional(),
   ministry: z.string().optional()
 });
+
+// Adicione isso no final do seu arquivo auth.schemas.ts
+export const firstAccessPasswordSchema = z.object({
+  newPassword: z.string().min(6, 'A senha deve ter pelo menos 6 caracteres')
+});

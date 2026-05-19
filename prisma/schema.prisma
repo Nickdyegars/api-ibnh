@@ -23,6 +23,7 @@ model User {
   created_at        DateTime  @default(now()) @db.Timestamptz(3)
   admin_id          String?
   ministry_access   String?   @default("all")
+  must_change_password Boolean @default(true)
 
   profile           UserProfile? // Relação 1:1 com o perfil
   schedules         Schedule[]   // Escalas que este usuário criou
@@ -36,11 +37,15 @@ model User {
 // ==========================================
 
 model Ministry {
-  id        Int        @id @default(autoincrement())
-  name      String     @unique @db.VarChar(100)
+  id          Int       @id @default(autoincrement())
+  name        String    @unique @db.VarChar(100)
   
-  members   Member[]
-  schedules Schedule[]
+  // Relacionamentos que você já tem:
+  members     Member[]
+  schedules   Schedule[]
+  
+  // 👇 ADICIONE ESTA LINHA AQUI 👇
+  teams       Team[]
 
   @@map("ministries")
   @@schema("app")
@@ -60,9 +65,15 @@ model UserProfile {
 }
 
 model Member {
-  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name        String    @db.VarChar(255)
-  phone       String?   @db.VarChar(20)
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String   @db.VarChar(255)
+  phone       String?  @db.VarChar(20)
+  role        String?  @db.VarChar(100) 
+  
+  // Substitua o 'team String?' por isso:
+  team_id     String?  @db.Uuid
+  team        Team?    @relation(fields: [team_id], references: [id], onDelete: SetNull)
+  
   ministry_id Int?
   ministry    Ministry? @relation(fields: [ministry_id], references: [id], onDelete: SetNull)
   created_at  DateTime? @default(now()) @db.Timestamptz(3)
@@ -70,6 +81,18 @@ model Member {
   shifts      ShiftAssignment[]
 
   @@map("members")
+  @@schema("app")
+}
+
+model Team {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String    @db.VarChar(100)
+  ministry_id Int?
+  ministry    Ministry? @relation(fields: [ministry_id], references: [id], onDelete: Cascade)
+  
+  members     Member[]
+
+  @@map("teams")
   @@schema("app")
 }
 

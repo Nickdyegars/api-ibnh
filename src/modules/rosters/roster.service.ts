@@ -106,20 +106,22 @@ export class RosterService {
     }
 
     async generateRosterPreview(data: any) {
-        const { month, ministry: ministryName, teamSize, restrictions } = data;
+        // 1. Recebemos o louvorMode enviado pelo modal
+        const { month, ministry: ministryName, teamSize, restrictions, louvorMode } = data;
 
-        // 1. Busca o Ministério e os Membros no Postgres
+        // 2. Busca o Ministério e os Membros no Postgres
         const ministry = await prisma.ministry.findUnique({ where: { name: ministryName } });
         if (!ministry) throw new Error("Ministério não encontrado");
 
+        // 👇 PUXAMOS O ROLE E O TEAM TAMBÉM
         const members = await prisma.member.findMany({
             where: { ministry_id: ministry.id },
-            select: { name: true }
+            select: { name: true, role: true, team: true }
         });
 
         if (members.length === 0) throw new Error("Nenhum membro cadastrado neste ministério");
 
-        // 2. Lógica de Datas (Quintas e Domingos)
+        // 3. Lógica de Datas (Quintas e Domingos)
         const [year, monthNum] = month.split('-').map(Number);
         const date = new Date(year, monthNum - 1, 1);
         const services: any[] = [];
@@ -128,13 +130,14 @@ export class RosterService {
             const dayOfWeek = date.getDay();
             if (dayOfWeek === 0 || dayOfWeek === 4) {
                 const rawDate = date.toISOString().split('T')[0];
-                // Helper para pegar o domingo daquela semana
+                const actualDate = new Date(rawDate + 'T12:00:00'); // 👈 Guarda a data real intacta
+
                 const tempDate = new Date(rawDate + 'T12:00:00');
                 const diff = tempDate.getDate() - tempDate.getDay();
                 const weekKey = new Date(tempDate.setDate(diff)).toDateString();
 
                 services.push({
-                    date: new Date(tempDate).toLocaleDateString('pt-BR'),
+                    date: actualDate.toLocaleDateString('pt-BR'), // 👈 Usa a data real aqui
                     rawDate,
                     dayName: dayOfWeek === 0 ? 'Domingo' : 'Quinta-feira',
                     weekKey
@@ -143,57 +146,111 @@ export class RosterService {
             date.setDate(date.getDate() + 1);
         }
 
-        // 3. Algoritmo de Sorteio (Bloco Semanal)
         const servicesByWeek = services.reduce((acc, s) => {
             if (!acc[s.weekKey]) acc[s.weekKey] = [];
             acc[s.weekKey].push(s);
             return acc;
         }, {});
 
-        let pool = [...members].sort(() => Math.random() - 0.5);
         const generatedShifts: any[] = [];
-        let memberIndex = 0;
 
-        Object.values(servicesByWeek).forEach((weekServices: any) => {
-            const weeklyTeam: string[] = [];
-            let attempts = 0;
-            const currentSize = ministryName.includes('Recepção') ? 1 : teamSize;
-
-            while (weeklyTeam.length < currentSize && attempts < pool.length * 2) {
-                // 1. Pegamos o objeto inteiro primeiro
-                const candidateObj = pool[memberIndex % pool.length];
-
-                // 2. Se por algum motivo bizarro o TypeScript achar que é undefined, pulamos a iteração
-                if (!candidateObj) {
-                    memberIndex++;
-                    attempts++;
-                    continue;
+        // ==============================================================
+        // MODO 1: LOUVOR POR EQUIPES/BANDAS FIXAS
+        // ==============================================================
+        // ==========================================
+        // MODO 1: LOUVOR POR EQUIPES/BANDAS FIXAS
+        // ==========================================
+        if (ministryName === 'Louvor' && louvorMode === 'EQUIPE') {
+            const teamsMap = members.reduce((acc, m: any) => {
+                // 👇 MUDANÇA AQUI: Agora m.team é um objeto, então acessamos m.team.name
+                if (m.team && m.team.name && m.team.name.trim() !== '') {
+                    const tName = m.team.name.trim();
+                    if (!acc[tName]) acc[tName] = [];
+                    acc[tName].push(m.name);
                 }
+                return acc;
+            }, {} as Record<string, string[]>);
 
-                // 3. Agora o TypeScript tem certeza que candidateObj existe e tem a propriedade name
-                const candidate = candidateObj.name;
-
-                const isAvailable = weekServices.every((s: any) =>
-                    !restrictions.some((r: any) => r.member === candidate && r.date === s.rawDate)
-                );
-
-                if (isAvailable && !weeklyTeam.includes(candidate)) {
-                    weeklyTeam.push(candidate);
-                }
-                memberIndex++;
-                attempts++;
+            const availableTeams = Object.keys(teamsMap);
+            if (availableTeams.length === 0) {
+                throw new Error("Nenhuma banda cadastrada! Edite os membros e adicione uma 'Equipe', ou mude o modo para 'Avulsos'.");
             }
 
-            const finalTeam = weeklyTeam.length > 0 ? weeklyTeam : ['SEM EQUIPE'];
-            weekServices.forEach((s: any) => {
-                generatedShifts.push({
-                    date: s.date,
-                    dayName: s.dayName,
-                    team: finalTeam
+            let teamPool = [...availableTeams].sort(() => Math.random() - 0.5);
+            let teamIdx = 0;
+
+            Object.values(servicesByWeek).forEach((weekServices: any) => {
+                let assignedTeamName = null;
+                let attempts = 0;
+
+                while (!assignedTeamName && attempts < teamPool.length * 2) {
+                    const candidateTeam = teamPool[teamIdx % teamPool.length];
+                    const teamMembers = teamsMap[candidateTeam] || [];
+
+                    const teamIsAvailable = weekServices.every((s: any) =>
+                        !restrictions?.some((r: any) => teamMembers.includes(r.member) && r.date === s.rawDate)
+                    );
+
+                    if (teamIsAvailable) assignedTeamName = candidateTeam;
+                    teamIdx++;
+                    attempts++;
+                }
+
+                const finalTeamMembers = assignedTeamName ? teamsMap[assignedTeamName] : ['SEM EQUIPE (Restrições)'];
+
+                weekServices.forEach((s: any) => {
+                    generatedShifts.push({ date: s.date, dayName: s.dayName, team: finalTeamMembers });
                 });
             });
-        });
+        }
 
+        // ==============================================================
+        // MODO 2: AVULSOS OU OUTROS MINISTÉRIOS (Sorteio Normal)
+        // ==============================================================
+        else {
+            let pool = [...members].sort(() => Math.random() - 0.5);
+            let memberIndex = 0;
+
+            Object.values(servicesByWeek).forEach((weekServices: any) => {
+                const weeklyTeam: string[] = [];
+                let attempts = 0;
+                const currentSize = ministryName.includes('Recepção') ? 1 : teamSize;
+
+                while (weeklyTeam.length < currentSize && attempts < pool.length * 2) {
+                    const candidateObj = pool[memberIndex % pool.length];
+
+                    if (!candidateObj) {
+                        memberIndex++;
+                        attempts++;
+                        continue;
+                    }
+
+                    const candidate = candidateObj.name;
+                    const isAvailable = weekServices.every((s: any) =>
+                        !restrictions.some((r: any) => r.member === candidate && r.date === s.rawDate)
+                    );
+
+                    if (isAvailable && !weeklyTeam.includes(candidate)) {
+                        // Se for Louvor Avulso, podemos até adicionar a função dele (opcional)
+                        // Ex: "João (Bateria)" - Vamos manter limpo só com nome por enquanto.
+                        weeklyTeam.push(candidate);
+                    }
+                    memberIndex++;
+                    attempts++;
+                }
+
+                const finalTeam = weeklyTeam.length > 0 ? weeklyTeam : ['SEM EQUIPE'];
+                weekServices.forEach((s: any) => {
+                    generatedShifts.push({
+                        date: s.date,
+                        dayName: s.dayName,
+                        team: finalTeam
+                    });
+                });
+            });
+        }
+
+        // 4. Retorna tudo ordenado
         return generatedShifts.sort((a, b) => {
             const dateA = a.date.split('/').reverse().join('-');
             const dateB = b.date.split('/').reverse().join('-');

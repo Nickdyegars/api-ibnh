@@ -3,7 +3,7 @@ import { prisma } from '../../shared/database/prisma.js';
 
 export class AuthService {
   async register(data: { name: string; email: string; password: string; role: string; ministry: string }) {
-    
+
     const userExists = await prisma.user.findUnique({ where: { email: data.email } });
     if (userExists) {
       throw new Error('Este e-mail já está cadastrado.');
@@ -49,7 +49,7 @@ export class AuthService {
     const users = await prisma.user.findMany({
       include: { profile: true },
       // Opcional: ordenar pelos mais recentes
-      orderBy: { id: 'desc' } 
+      orderBy: { id: 'desc' }
     });
 
     // Formatamos para o frontend entender facilmente
@@ -72,7 +72,7 @@ export class AuthService {
 
     // Prepara os dados básicos
     const updateData: any = {};
-    
+
     if (data.role) {
       updateData.user_level = data.role === 'admin' ? 0 : 1;
     }
@@ -119,7 +119,26 @@ export class AuthService {
     // Apaga o usuário (Se o seu schema.prisma não tiver onDelete: Cascade no Profile,
     // avisarei caso dê erro de foreign key, mas o Fastify tratará isso).
     await prisma.user.delete({ where: { id } });
-    
+
+    return true;
+  }
+
+  async updateFirstPassword(id: string, newPassword: string) {
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) throw new Error('Usuário não encontrado.');
+    if (!user.must_change_password) throw new Error('Este usuário já redefiniu sua senha.');
+
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(newPassword, salt);
+
+    await prisma.user.update({
+      where: { id },
+      data: {
+        password_hash,
+        must_change_password: false // 👈 A trava é removida aqui
+      }
+    });
+
     return true;
   }
 }

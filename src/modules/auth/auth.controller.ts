@@ -1,6 +1,6 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthService } from './auth.service.js';
-import { registerSchema, loginSchema, updateUserSchema } from './auth.schemas.js';
+import { registerSchema, loginSchema, updateUserSchema, firstAccessPasswordSchema } from './auth.schemas.js';
 
 const authService = new AuthService();
 
@@ -40,12 +40,11 @@ export class AuthController {
       const data = loginSchema.parse(request.body);
       const user = await authService.login(data);
 
-      // AGORA SIM: Colocamos o ministry_access dentro do Token JWT!
       const token = await reply.jwtSign({
         sub: user.id,
         email: user.email,
         level: user.user_level,
-        ministry_access: user.ministry_access // <-- Faltava isso aqui
+        ministry_access: user.ministry_access
       });
 
       return reply.send({
@@ -54,7 +53,9 @@ export class AuthController {
           id: user.id,
           email: user.email,
           level: user.user_level,
-          ministry_access: user.ministry_access // <-- E faltava isso aqui!
+          ministry_access: user.ministry_access,
+          // 👇 INCLUÍDA A FLAG DE TROCA DE SENHA 👇
+          mustChangePassword: user.must_change_password
         }
       });
     } catch (error: any) {
@@ -62,6 +63,23 @@ export class AuthController {
         return reply.status(400).send({ error: error.errors[0].message });
       }
       return reply.status(401).send({ error: error.message });
+    }
+  }
+
+  // 👇 NOVO MÉTODO PARA A REDEFINIÇÃO 👇
+  async updateFirstPassword(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const user = request.user as any;
+      const { newPassword } = firstAccessPasswordSchema.parse(request.body);
+
+      await authService.updateFirstPassword(user.sub, newPassword);
+
+      return reply.send({ message: 'Senha atualizada com sucesso!' });
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        return reply.status(400).send({ error: error.errors[0].message });
+      }
+      return reply.status(400).send({ error: error.message });
     }
   }
 
@@ -78,12 +96,12 @@ export class AuthController {
     try {
       // Pega o ID que vem na URL (ex: /users/123)
       const { id } = request.params as { id: string };
-      
+
       // Valida os campos usando o nosso novo Schema
       const data = updateUserSchema.parse(request.body);
-      
+
       const user = await authService.updateUser(id, data);
-      
+
       return reply.send({ message: 'Usuário atualizado com sucesso!', user });
     } catch (error: any) {
       if (error.name === 'ZodError') {
@@ -97,7 +115,7 @@ export class AuthController {
     try {
       const { id } = request.params as { id: string };
       await authService.deleteUser(id);
-      
+
       return reply.send({ message: 'Usuário apagado com sucesso!' });
     } catch (error: any) {
       return reply.status(400).send({ error: error.message });

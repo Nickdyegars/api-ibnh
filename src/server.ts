@@ -16,6 +16,7 @@ import { communityBusinessCategoryRoutes } from './modules/community-business-ca
 import { landingConfigRoutes } from './modules/landing-config/landing-config.routes.js';
 import { ecdRoutes } from './modules/ecd/ecd.routes.js';
 import { repertorioRoutes } from './modules/repertorio/repertorio.routes.js';
+import { teamRoutes } from './modules/teams/team.routes.js';
 
 const app = Fastify({ logger: true });
 
@@ -54,6 +55,7 @@ app.register(communityBusinessCategoryRoutes);
 app.register(landingConfigRoutes);
 app.register(ecdRoutes); // Registra as rotas do ECD
 app.register(repertorioRoutes); // Registra as rotas do Repertório
+app.register(teamRoutes); // Registra as rotas de equipes
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

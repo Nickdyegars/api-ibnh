@@ -10,15 +10,27 @@ export class EcdController {
 
   async register(request: FastifyRequest, reply: FastifyReply) {
     try {
-      // 1. Lemos as partes do FormData (Multipart)
       const parts = request.parts();
       let bodyData: any = {};
       let files: any = {};
 
+      // 👇 LISTA VIP DE ARQUIVOS PERMITIDOS (Filtro de Segurança) 👇
+      const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'application/pdf'];
+
       for await (const part of parts) {
         if (part.type === 'file') {
-          // É um arquivo (foto)
+
+          // Trava de Segurança 1: Extensão/Formato do Arquivo
+          if (!allowedMimeTypes.includes(part.mimetype)) {
+            return reply.status(400).send({
+              success: false,
+              message: `Formato de arquivo não permitido: ${part.filename}. Envie apenas JPG, PNG ou PDF.`
+            });
+          }
+
           const buffer = await part.toBuffer();
+
+          // Trava de Segurança 2: Arquivo vazio
           if (buffer.length > 0) {
             files[part.fieldname] = {
               filename: part.filename,
@@ -27,15 +39,14 @@ export class EcdController {
             };
           }
         } else {
-          // É um campo de texto
           bodyData[part.fieldname] = part.value;
         }
       }
 
-      // 2. Validamos os campos de texto no Zod
+      // Validação do Zod
       const data = registerEcdSchema.parse(bodyData);
 
-      // 3. Enviamos os dados e os arquivos separados para o Service
+      // Envia os dados limpos e seguros para o Service
       const registration = await ecdService.createRegistration(data, files);
 
       return reply.status(201).send({
@@ -170,9 +181,9 @@ export class EcdController {
   async deleteRegistration(request: FastifyRequest, reply: FastifyReply) {
     try {
       const { id } = request.params as { id: string };
-      
+
       await ecdService.deleteRegistration(id);
-      
+
       return reply.send({ success: true, message: 'Ficha excluída e link devolvido ao líder!' });
     } catch (error: any) {
       console.error(error);

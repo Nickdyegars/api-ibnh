@@ -16,7 +16,7 @@ export async function authRoutes(app: FastifyInstance) {
       try {
         await request.jwtVerify();
       } catch (err) {
-        return reply.status(401).send({ error: 'Acesso negado. Apenas administradores podem criar usuários.' });
+        return reply.status(401).send({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
       }
     });
 

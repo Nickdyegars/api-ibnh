@@ -5,37 +5,63 @@ import { uploadImage } from '../../shared/storage/minio.js';
 export async function cmsRoutes(app: FastifyInstance) {
     const cmsController = new CmsController();
 
-    // Middleware de Autenticação
+    // 👇 1. O SEGURANÇA BLINDADO (Verifica Token E Privilégio de Admin)
     const authenticate = async (request: FastifyRequest, reply: FastifyReply) => {
-        try { await request.jwtVerify(); }
-        catch (err) { return reply.status(401).send({ error: 'Não autorizado.' }); }
+        try { 
+            await request.jwtVerify(); 
+            const requester = request.user as any;
+            
+            // Trava RBAC: Somente o Administrador (Nível 0) mexe no site público
+            if (requester.level !== 0) {
+                return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem editar o site.' });
+            }
+        }
+        catch (err) { 
+            return reply.status(401).send({ error: 'Sessão inválida ou expirada. Faça login novamente.' }); 
+        }
     };
 
     // ==========================================
-    // UPLOAD DE IMAGENS (MinIO)
+    // UPLOAD DE IMAGENS (MinIO) COM DETECTOR DE METAIS
     // ==========================================
     app.post('/cms/upload', { onRequest: [authenticate] }, async (request, reply) => {
         try {
-            const parts = request.parts(); // Lê o formulário parte por parte
+            const parts = request.parts(); 
             let fileData: any = null;
-            let folder = 'geral'; // Pasta padrão
+            let folder = 'geral'; 
+
+            // 👇 2. LISTA VIP DE ARQUIVOS (Apenas imagens seguras)
+            const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
 
             for await (const part of parts) {
                 if (part.type === 'file') {
+                    
+                    // Trava de Extensão/Vírus
+                    if (!allowedMimeTypes.includes(part.mimetype)) {
+                        return reply.status(400).send({ 
+                            error: `Formato de arquivo não permitido: ${part.mimetype}. Envie apenas imagens JPG, PNG ou WEBP.` 
+                        });
+                    }
+
                     const buffer = await part.toBuffer();
+                    
+                    // Trava de Arquivo Vazio
+                    if (buffer.length === 0) {
+                        return reply.status(400).send({ error: 'O arquivo enviado está vazio.' });
+                    }
+
                     fileData = {
                         filename: part.filename,
                         buffer: buffer,
                         mimetype: part.mimetype
                     };
                 } else if (part.type === 'field' && part.fieldname === 'folder') {
-                    folder = part.value as string; // Pega o nome da pasta enviada pelo React
+                    folder = part.value as string; 
                 }
             }
 
             if (!fileData) return reply.status(400).send({ error: 'Nenhum ficheiro enviado.' });
 
-            // Passamos a pasta para a função do MinIO
             const imageUrl = await uploadImage(fileData.filename, fileData.buffer, fileData.mimetype, folder);
 
             return reply.send({ url: imageUrl });
@@ -43,6 +69,7 @@ export async function cmsRoutes(app: FastifyInstance) {
             return reply.status(500).send({ error: 'Erro ao fazer upload: ' + error.message });
         }
     });
+
     // ==========================================
     // SOBRE NÓS E CONTATOS
     // ==========================================

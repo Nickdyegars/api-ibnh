@@ -69,7 +69,21 @@ export class CommunityBusinessController {
                 return reply.status(400).send({ error: 'Nenhum arquivo enviado.' });
             }
 
+            // 👇 LISTA VIP DE ARQUIVOS (Apenas imagens seguras) 👇
+            const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+
+            if (!allowedMimeTypes.includes(data.mimetype)) {
+                return reply.status(400).send({
+                    error: `Formato não permitido: ${data.mimetype}. Envie apenas imagens JPG, PNG ou WEBP.`
+                });
+            }
+
             const buffer = await data.toBuffer();
+
+            // Trava de Arquivo Vazio
+            if (buffer.length === 0) {
+                return reply.status(400).send({ error: 'O arquivo enviado está vazio.' });
+            }
 
             // Usa a sua função pronta, guardando na pasta 'empreendedores'
             const fileUrl = await uploadImage(data.filename, buffer, data.mimetype, 'empreendedores');

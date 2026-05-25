@@ -1,4 +1,3 @@
-// src/modules/finance/finance.controller.ts
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { FinanceService } from './finance.service.js';
 import { financeSchema, expenseSchema } from './finance.schemas.js';
@@ -6,6 +5,8 @@ import { financeSchema, expenseSchema } from './finance.schemas.js';
 const financeService = new FinanceService();
 
 export class FinanceController {
+  
+  // --- HANDLERS DE ENTRADAS ---
   async getAll(request: FastifyRequest, reply: FastifyReply) {
     try {
       const entries = await financeService.getAll();
@@ -46,7 +47,7 @@ export class FinanceController {
     }
   }
 
-  // --- HANDLERS DE SAÍDAS ---
+  // --- HANDLERS DE SAÍDAS (DESPESAS) ---
   async getAllExpenses(request: FastifyRequest, reply: FastifyReply) {
     try {
       const expenses = await financeService.getAllExpenses();

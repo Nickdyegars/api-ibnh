@@ -82,7 +82,33 @@ export class RosterController {
 
     async delete(request: FastifyRequest, reply: FastifyReply) {
         try {
+            const user = request.user as any;
             const { id } = request.params as { id: string };
+
+            // === TRAVA DE SEGURANÇA (RBAC) ===
+            if (user.level > 0) {
+                // Precisamos buscar a escala no banco rapidinho só para saber de qual ministério ela é
+                const schedule = await prisma.schedule.findUnique({
+                    where: { id },
+                    include: { ministry: true }
+                });
+
+                if (!schedule) return reply.status(404).send({ error: 'Escala não encontrada.' });
+
+                const userMinistryName = user.ministry_access || user.ministry || '';
+                const userMin = userMinistryName.trim().toLowerCase();
+                const dataMin = (schedule.ministry?.name || '').trim().toLowerCase();
+
+                const isMultimediaSub = userMin === 'multimídia' && dataMin.includes('multimídia');
+
+                if (userMin !== dataMin && !isMultimediaSub) {
+                    return reply.status(403).send({
+                        error: `Acesso negado: Seu perfil não tem permissão para apagar escalas de ${schedule.ministry?.name}.`
+                    });
+                }
+            }
+            // =================================
+
             await rosterService.deleteRoster(id);
             return reply.send({ message: 'Escala apagada com sucesso' });
         } catch (error: any) {

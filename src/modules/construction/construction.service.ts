@@ -1,6 +1,7 @@
 // src/modules/construction/construction.service.ts
 import { prisma } from '../../shared/database/prisma.js';
 import { ConstructionInfoType } from './construction.schemas.js';
+import { deleteImage } from '../../shared/storage/minio.js';
 
 export class ConstructionService {
 
@@ -48,16 +49,28 @@ export class ConstructionService {
   }
 
   async deletePhoto(id: string) {
+    // 1. Busca a foto para saber a URL
+    const photo = await prisma.siteConstructionPhoto.findUnique({
+      where: { id }
+    });
+
+    // 2. Apaga do MinIO primeiro
+    if (photo && photo.image_url) {
+      await deleteImage(photo.image_url);
+    }
+
+    // 3. Apaga do banco
     await prisma.siteConstructionPhoto.delete({
       where: { id }
     });
+
     return { success: true };
   }
 
   async updatePhotoOrder(id: string, newOrder: number) {
-  return await prisma.siteConstructionPhoto.update({
-    where: { id },
-    data: { order: newOrder }
-  });
-}
+    return await prisma.siteConstructionPhoto.update({
+      where: { id },
+      data: { order: newOrder }
+    });
+  }
 }

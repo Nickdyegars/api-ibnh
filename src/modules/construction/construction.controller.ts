@@ -6,7 +6,7 @@ import { constructionInfoSchema, constructionPhotoSchema } from './construction.
 const constructionService = new ConstructionService();
 
 export class ConstructionController {
-  
+
   // Pega tudo de uma vez para a Landing Page (Info + Fotos)
   async getPublicData(request: FastifyRequest, reply: FastifyReply) {
     try {
@@ -64,6 +64,22 @@ export class ConstructionController {
       return reply.send({ message: 'Foto apagada com sucesso' });
     } catch (error) {
       return reply.status(400).send({ error: 'Erro ao apagar foto' });
+    }
+  }
+
+  async updateOrder(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { id } = request.params as { id: string };
+      const { order } = request.body as { order: number };
+
+      if (typeof order !== 'number') {
+        return reply.status(400).send({ error: 'A nova ordem deve ser um número válido.' });
+      }
+
+      const updated = await constructionService.updatePhotoOrder(id, order);
+      return reply.send(updated);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message || 'Erro ao atualizar ordem.' });
     }
   }
 }

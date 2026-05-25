@@ -11,11 +11,20 @@ export async function communityBusinessCategoryRoutes(app: FastifyInstance) {
   // ROTAS PRIVADAS (Requer Login no Painel)
   app.register(async function privateRoutes(childApp) {
     
+    // 👇 O HOOK DE SEGURANÇA MÁXIMA (Token + Nível) 👇
     childApp.addHook('onRequest', async (request, reply) => {
       try {
         await request.jwtVerify();
+        const requester = request.user as any;
+        
+        // APENAS ADMINS (Nível 0) podem ver, criar, editar ou apagar as categorias no CMS
+        if (requester.level !== 0) {
+          return reply.status(403).send({ 
+            error: 'Acesso negado. Apenas administradores podem gerenciar as categorias de negócios.' 
+          });
+        }
       } catch (err) {
-        return reply.status(401).send({ error: 'Não autorizado.' });
+        return reply.status(401).send({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
       }
     });
 

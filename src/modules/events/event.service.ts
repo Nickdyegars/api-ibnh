@@ -2,6 +2,7 @@
 import { prisma } from '../../shared/database/prisma.js';
 // Trocamos a importação para incluir o UpdateEventType
 import { EventBodyType, UpdateEventType } from './event.schemas.js';
+import { deleteImage } from '../../shared/storage/minio.js';
 
 export class EventService {
 
@@ -38,7 +39,7 @@ export class EventService {
 
   // 👇 MUDAMOS AQUI: De Partial<EventBodyType> para UpdateEventType
   async updateEvent(id: string, data: UpdateEventType) {
-    
+
     const updateData: any = {};
 
     if (data.title !== undefined) updateData.title = data.title;
@@ -55,14 +56,30 @@ export class EventService {
       where: { id },
       data: updateData
     });
-    
+
     return event;
   }
 
   async deleteEvent(id: string) {
+    // 1. Busca o evento para pegar a URL da imagem
+    const event = await prisma.siteEvent.findUnique({
+      where: { id }
+    });
+
+    if (!event) {
+      throw new Error("Evento não encontrado.");
+    }
+
+    // 2. Se o evento tiver um banner, apaga do MinIO primeiro
+    if (event.image_url) {
+      await deleteImage(event.image_url);
+    }
+
+    // 3. Apaga o registro do banco de dados
     await prisma.siteEvent.delete({
       where: { id }
     });
+
     return { success: true };
   }
 }

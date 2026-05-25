@@ -1,4 +1,3 @@
-// src/modules/community-business/community-business.routes.ts
 import { FastifyInstance } from 'fastify';
 import { CommunityBusinessController } from './community-business.controller.js';
 
@@ -12,16 +11,24 @@ export async function communityBusinessRoutes(app: FastifyInstance) {
   // === ROTAS PRIVADAS (Requer Login no Painel) ===
   app.register(async function privateRoutes(childApp) {
     
-    // Hook de Autenticação JWT (Igual ao seu padrão)
+    // 👇 O HOOK DE SEGURANÇA MÁXIMA 👇
     childApp.addHook('onRequest', async (request, reply) => {
       try {
         await request.jwtVerify();
+        const requester = request.user as any;
+        
+        // APENAS ADMINS podem aprovar, editar ou deletar negócios
+        if (requester.level !== 0) {
+          return reply.status(403).send({ 
+            error: 'Acesso negado. Apenas administradores podem gerenciar o Guia de Empreendedores.' 
+          });
+        }
       } catch (err) {
-        return reply.status(401).send({ error: 'Não autorizado.' });
+        return reply.status(401).send({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
       }
     });
 
-    // CRUD do Painel
+    // CRUD do Painel (Agora 100% blindado)
     childApp.get('/cms/community-businesses', (req, rep) => controller.getAllCms(req, rep));
     childApp.post('/cms/community-businesses', (req, rep) => controller.create(req, rep));
     childApp.put('/cms/community-businesses/:id', (req, rep) => controller.update(req, rep));

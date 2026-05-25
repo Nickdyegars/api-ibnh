@@ -1,15 +1,18 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { MemberController } from './member.controller.js';
 
 export async function memberRoutes(app: FastifyInstance) {
   const memberController = new MemberController();
 
-  // === O CADEADO: Exige token válido para todas as rotas abaixo ===
-  app.addHook('onRequest', async (request, reply) => {
+  // === O CADEADO BLINDADO (Token + Nível) ===
+  app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       await request.jwtVerify();
+      // Opcional: Se apenas Admin (0) e Líderes (1) podem acessar essa área:
+      // const requester = request.user as any;
+      // if (requester.level > 1) return reply.status(403).send({ error: 'Acesso negado.' });
     } catch (err) {
-      return reply.status(401).send({ error: 'Não autorizado. Faça login novamente.' });
+      return reply.status(401).send({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
     }
   });
   // ===============================================================

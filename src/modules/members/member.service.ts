@@ -15,7 +15,10 @@ export class MemberService {
 
   async getAllMembers() {
     const members = await prisma.member.findMany({
-      include: { ministry: true },
+      include: {
+        ministry: true,
+        team: true // 👈 A CORREÇÃO ESTÁ AQUI! Tem que pedir pro banco trazer a equipe.
+      },
       orderBy: { name: 'asc' }
     });
 
@@ -23,7 +26,8 @@ export class MemberService {
       id: m.id,
       name: m.name,
       phone: m.phone,
-      role: m.role, teamName: m.team?.name, // 👈 INCLUI O ROLE NO RETORNO
+      role: m.role,
+      teamName: m.team?.name, // Agora o TypeScript sabe que 'team' existe!
       ministry: m.ministry?.name || 'Geral',
       createdAt: m.created_at
     }));
@@ -40,7 +44,7 @@ export class MemberService {
         team_id: data.team ?? null,
         ministry_id: ministryId
       },
-      include: { ministry: true, team: true}
+      include: { ministry: true, team: true }
     });
 
     return {
@@ -60,10 +64,10 @@ export class MemberService {
       where: { id },
       data: {
         name: data.name,
-      phone: data.phone ?? null,
-      role: data.role ?? null,
-      team_id: data.team ?? null, // 👈 SALVAR A EQUIPA
-      ministry_id: ministryId
+        phone: data.phone ?? null,
+        role: data.role ?? null,
+        team_id: data.team ?? null, // 👈 SALVAR A EQUIPA
+        ministry_id: ministryId
       },
       include: { ministry: true, team: true }
     });
@@ -77,7 +81,7 @@ export class MemberService {
       createdAt: member.created_at
     };
   }
-  
+
   async deleteMember(id: string) {
     await prisma.shiftAssignment.deleteMany({
       where: { member_id: id }

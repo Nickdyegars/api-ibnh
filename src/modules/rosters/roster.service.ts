@@ -150,21 +150,18 @@ export class RosterService {
             if (!acc[s.weekKey]) acc[s.weekKey] = [];
             acc[s.weekKey].push(s);
             return acc;
-        }, {});
+        }, {} as Record<string, any[]>);
 
         const generatedShifts: any[] = [];
 
         // ==============================================================
         // MODO 1: LOUVOR POR EQUIPES/BANDAS FIXAS
         // ==============================================================
-        // ==========================================
-        // MODO 1: LOUVOR POR EQUIPES/BANDAS FIXAS
-        // ==========================================
         if (ministryName === 'Louvor' && louvorMode === 'EQUIPE') {
             const teamsMap = members.reduce((acc, m: any) => {
-                // 👇 MUDANÇA AQUI: Agora m.team é um objeto, então acessamos m.team.name
                 if (m.team && m.team.name && m.team.name.trim() !== '') {
                     const tName = m.team.name.trim();
+                    // Tipamos o acc para evitar o erro do index type
                     if (!acc[tName]) acc[tName] = [];
                     acc[tName].push(m.name);
                 }

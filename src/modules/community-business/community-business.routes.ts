@@ -7,6 +7,8 @@ export async function communityBusinessRoutes(app: FastifyInstance) {
   // === ROTA PÚBLICA (Livre para o Site) ===
   app.get('/public/community-businesses', (req, rep) => controller.getPublic(req, rep));
   app.post('/public/community-businesses/:id/click', (request, reply) => controller.registerClick(request, reply));
+  app.post('/public/community-businesses/upload', (req, rep) => controller.uploadLogo(req, rep));
+  app.post('/public/community-businesses/register', (req, rep) => controller.registerPublic(req, rep));
 
   // === ROTAS PRIVADAS (Requer Login no Painel) ===
   app.register(async function privateRoutes(childApp) {

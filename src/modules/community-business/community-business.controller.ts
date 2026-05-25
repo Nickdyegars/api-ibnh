@@ -61,15 +61,28 @@ export class CommunityBusinessController {
         }
     }
 
-    async uploadLogo(request: FastifyRequest, reply: FastifyReply) {
+async uploadLogo(request: FastifyRequest, reply: FastifyReply) {
         try {
-            const data = await request.file();
+            // 👇 1. A TRAVA DE SEGURANÇA (Máx: 5MB) 👇
+            // Isso impede ataques de esgotamento de memória (DDoS)
+            const data = await request.file({
+                limits: {
+                    fileSize: 5 * 1024 * 1024, // 5 Megabytes em bytes
+                }
+            });
 
             if (!data) {
                 return reply.status(400).send({ error: 'Nenhum arquivo enviado.' });
             }
 
-            // 👇 LISTA VIP DE ARQUIVOS (Apenas imagens seguras) 👇
+            // 👇 2. VERIFICA SE O ARQUIVO FOI CORTADO PELO LIMITE 👇
+            if (data.file.truncated) {
+                return reply.status(400).send({ 
+                    error: 'A imagem é muito grande. O tamanho máximo permitido é de 5MB.' 
+                });
+            }
+
+            // 3. LISTA VIP DE ARQUIVOS (Apenas imagens seguras)
             const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
 
             if (!allowedMimeTypes.includes(data.mimetype)) {
@@ -78,6 +91,7 @@ export class CommunityBusinessController {
                 });
             }
 
+            // Agora é seguro converter para buffer, pois garantimos que tem no máximo 5MB
             const buffer = await data.toBuffer();
 
             // Trava de Arquivo Vazio
@@ -91,7 +105,7 @@ export class CommunityBusinessController {
             return reply.send({ url: fileUrl });
         } catch (error) {
             console.error('Erro no upload da logo:', error);
-            return reply.status(500).send({ error: 'Erro ao fazer upload da imagem.' });
+            return reply.status(500).send({ error: 'Erro interno ao processar a imagem.' });
         }
     }
 
@@ -112,6 +126,30 @@ export class CommunityBusinessController {
         } catch (error: any) {
             console.error("Erro ao registrar clique:", error);
             return reply.status(500).send({ error: "Erro interno ao registrar métrica." });
+        }
+    }
+
+    // Adicione junto das outras funções públicas no community-business.controller.ts
+    async registerPublic(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            // 1. Valida os dados usando o Schema Zod para não entrar "lixo" no banco
+            const data = communityBusinessSchema.parse(request.body);
+
+            // 2. A CHAVE MESTRA DA SEGURANÇA:
+            // Forçamos o negócio a nascer inativo (pendente), não importa o que o "hacker" mandou no JSON
+            data.is_active = false;
+
+            // 3. Cria o registro
+            const newBusiness = await businessService.create(data);
+            return reply.status(201).send(newBusiness);
+
+        } catch (error: any) {
+            console.error("Erro no cadastro público:", error);
+            // Se for erro do Zod, enviamos a mensagem bonitinha do primeiro erro
+            if (error.errors) {
+                return reply.status(400).send({ error: error.errors[0].message });
+            }
+            return reply.status(400).send({ error: 'Erro ao processar cadastro. Tente novamente.' });
         }
     }
 }

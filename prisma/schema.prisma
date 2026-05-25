@@ -403,6 +403,8 @@ model LandingPageConfig {
   // Configurações do Guia de Empreendedores
   business_form_url  String?  @db.Text
   show_business_form Boolean  @default(true)
+  show_whatsapp      Boolean  @default(true)
+  whatsapp_number    String?  @default("5573999999999")
 
   updated_at         DateTime @updatedAt
   

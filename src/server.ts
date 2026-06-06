@@ -18,6 +18,7 @@ import { landingConfigRoutes } from './modules/landing-config/landing-config.rou
 import { ecdRoutes } from './modules/ecd/ecd.routes.js';
 import { repertorioRoutes } from './modules/repertorio/repertorio.routes.js';
 import { teamRoutes } from './modules/teams/team.routes.js';
+import { ecdWorkersRoutes } from './modules/ecd-workers/ecd-workers.routes.js';
 import fastifyRateLimit from '@fastify/rate-limit';
 
 const app = Fastify({ logger: true });
@@ -76,9 +77,10 @@ app.register(fastifyJwt, {
 
 app.register(multipart, {
   limits: {
-    fileSize: 15 * 1024 * 1024
+    fileSize: 10 * 1024 * 1024,
+    files: 1
   }
-}); // 5MB max
+}); // 10MB max
 
 app.addHook('onReady', async () => {
   await setupMinioBucket();
@@ -99,6 +101,7 @@ app.register(landingConfigRoutes);
 app.register(ecdRoutes); // Registra as rotas do ECD
 app.register(repertorioRoutes); // Registra as rotas do Repertório
 app.register(teamRoutes); // Registra as rotas de equipes
+app.register(ecdWorkersRoutes); // Registra as rotas do ECD Trabalhadores
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

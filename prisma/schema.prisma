@@ -420,7 +420,6 @@ model EcdLeader {
   id                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   name               String   @db.VarChar(255)
   
-  // Cotas de Fichas
   total_yellow_slots Int      @default(0)
   used_yellow_slots  Int      @default(0) 
   total_green_slots  Int      @default(0)
@@ -452,60 +451,191 @@ model EcdToken {
   @@schema("app")
 }
 
+model EcdEdition {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   @unique 
+  yellow_slots  Int      @default(0)
+  green_slots   Int      @default(0)
+  worker_slots  Int      @default(0)
+  is_active     Boolean  @default(false)
+  created_at    DateTime @default(now()) @db.Timestamptz(3)
+
+  registrations EcdRegistration[] 
+  worker_slots_config EcdEditionWorkerSlot[]
+  worker_registrations EcdWorkerRegistration[]
+
+  @@map("ecd_editions")
+  @@schema("app") // Corrigido para "app"
+}
+
 model EcdRegistration {
-  id                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   
-  // Imagens
-  profile_photo_url  String?  @db.Text
-  receipt_photo_url  String?  @db.Text
+  profile_photo_url String?  @db.Text
+  receipt_photo_url String?  @db.Text
   
-  // Dados Pessoais
-  full_name          String   @db.VarChar(255)
-  nickname           String?  @db.VarChar(100)
-  phone              String   @db.VarChar(20)
-  gender             String   @db.VarChar(1) // "M" ou "F"
-  age                Int
-  address            String?  @db.Text
+  full_name         String   @db.VarChar(255)
+  nickname          String?  @db.VarChar(100)
+  phone             String   @db.VarChar(20)
+  gender            String   @db.VarChar(1) 
+  age               Int
+  address           String?  @db.Text
   
-  // Família
-  is_married         Boolean  @default(false)
-  spouse_name        String?  @db.VarChar(255)
-  relative_going     Boolean  @default(false)
-  relative_degree    String?  @db.VarChar(100)
+  is_married        Boolean  @default(false)
+  spouse_name       String?  @db.VarChar(255)
+  relative_going    Boolean  @default(false)
+  relative_degree   String?  @db.VarChar(100)
   
-  // Saúde e Alimentação
-  has_illness        Boolean  @default(false)
-  illness_desc       String?  @db.Text
-  takes_medication   Boolean  @default(false)
-  medication_desc    String?  @db.Text
+  has_illness       Boolean  @default(false)
+  illness_desc      String?  @db.Text
+  takes_medication  Boolean  @default(false)
+  medication_desc   String?  @db.Text
   dietary_restriction Boolean @default(false)
-  dietary_desc       String?  @db.Text
-  shirt_size         String?  @db.VarChar(10)
+  dietary_desc      String?  @db.Text
+  shirt_size        String?  @db.VarChar(10)
   
-  // Emergência
-  emergency_contact  String?  @db.VarChar(255)
-  emergency_phone    String?  @db.VarChar(20)
+  emergency_contact String?  @db.VarChar(255)
+  emergency_phone   String?  @db.VarChar(20)
 
-  // Igreja
-  is_first_time      Boolean  @default(true)
-  in_cell            Boolean  @default(false)
-  cell_leader_name   String?  @db.VarChar(255)
-  invited_by         String?  @db.VarChar(255)
+  in_cell           Boolean  @default(false)
+  cell_leader_name  String?  @db.VarChar(255)
+  invited_by        String?  @db.VarChar(255)
   
-  // Controle Administrativo
-  payment_status     String   @default("PENDENTE") @db.VarChar(50) // PENDENTE, PARCIAL, PAGO
-  ficha_type         String   @db.VarChar(50) // "AMARELA" ou "VERDE"
+  payment_status    String   @default("PENDENTE") @db.VarChar(50)
+  ficha_type        String   @db.VarChar(50) 
   
-  // Vínculos Relacionais
-  leader_id          String   @db.Uuid
-  leader             EcdLeader @relation(fields: [leader_id], references: [id])
+  leader_id         String   @db.Uuid
+  leader            EcdLeader @relation(fields: [leader_id], references: [id])
   
-  token_id           String   @unique @db.Uuid
-  token              EcdToken @relation(fields: [token_id], references: [id])
+  token_id          String   @unique @db.Uuid
+  token             EcdToken @relation(fields: [token_id], references: [id])
 
-  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  
+  // Controle de Histórico
+  status            String   @default("ATIVO") 
+  edition_id        String?  @db.Uuid
+  edition           EcdEdition? @relation(fields: [edition_id], references: [id])
 
   @@map("ecd_registrations")
+  @@schema("app")
+}
+
+// ==========================================
+// MÓDULO: ECD - EQUIPE / TRABALHADORES
+// ==========================================
+
+// 1. Áreas de Trabalho (Ex: Cozinha, Apoio, Mídia)
+model EcdWorkerArea {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name          String   @unique @db.VarChar(100)
+  
+  leaders       EcdWorkerLeader[]
+  registrations EcdWorkerRegistration[]
+  edition_slots EcdEditionWorkerSlot[]
+
+  @@map("ecd_worker_areas")
+  @@schema("app")
+}
+
+// 2. Líderes de Equipe (Ex: Pr. Marcos da Cozinha)
+model EcdWorkerLeader {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name          String   @db.VarChar(255)
+  
+  area_id       String   @db.Uuid
+  area          EcdWorkerArea @relation(fields: [area_id], references: [id], onDelete: Cascade)
+
+  tokens        EcdWorkerToken[]
+  registrations EcdWorkerRegistration[]
+
+  @@map("ecd_worker_leaders")
+  @@schema("app")
+}
+
+// 3. Vagas por Área em cada Edição (Para a aba de Definir Vagas)
+model EcdEditionWorkerSlot {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  slots       Int      @default(0)
+  
+  edition_id  String   @db.Uuid
+  edition     EcdEdition @relation(fields: [edition_id], references: [id], onDelete: Cascade)
+  
+  area_id     String   @db.Uuid
+  area        EcdWorkerArea @relation(fields: [area_id], references: [id], onDelete: Cascade)
+
+  @@unique([edition_id, area_id]) // Garante que não repete a mesma área na mesma edição
+  @@map("ecd_edition_worker_slots")
+  @@schema("app")
+}
+
+// 4. Links de Inscrição dos Trabalhadores
+model EcdWorkerToken {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  token_code   String   @unique @default(dbgenerated("uuid_generate_v4()")) @db.Uuid 
+  is_used      Boolean  @default(false)
+  usedAt       DateTime? @db.Timestamptz(3)
+
+  leader_id    String   @db.Uuid
+  leader       EcdWorkerLeader @relation(fields: [leader_id], references: [id], onDelete: Cascade)
+  
+  registration EcdWorkerRegistration?
+
+  @@map("ecd_worker_tokens")
+  @@schema("app")
+}
+
+// 5. A Ficha de Pré-inscrição do Trabalhador
+model EcdWorkerRegistration {
+  id                      String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  
+  // --- DADOS DA FICHA ---
+  full_name               String   @db.VarChar(255)
+  gender                  String   @db.VarChar(1)
+  phone                   String   @db.VarChar(20)
+  age                     Int
+  marital_status          String   @db.VarChar(50)
+  
+  has_served_before       Boolean  @default(false)
+  previous_team           String?  @db.VarChar(100)
+  
+  bringing_target         Boolean  @default(false)
+  target_name             String?  @db.VarChar(255)
+  
+  cell_leader             String?  @db.VarChar(255)
+  
+  relative_participating  Boolean  @default(false)
+  relative_kinship        String?  @db.VarChar(100)
+
+  // --- SAÚDE E SEGURANÇA ---
+  emergency_contact       String?  @db.VarChar(255)
+  emergency_phone         String?  @db.VarChar(20)
+  health_issues           String?  @db.Text
+  dietary_restrictions    String?  @db.Text
+  profile_photo_url       String?  @db.Text
+  observations            String?  @db.Text
+
+  // --- FLUXO DE PRÉ-INSCRIÇÃO E CONFIRMAÇÃO ---
+  status                  String   @default("PENDENTE") @db.VarChar(20) // PENDENTE, APROVADO, RECUSADO
+  payment_status          String   @default("PENDENTE") @db.VarChar(20) // PENDENTE, PAGO
+  receipt_photo_url       String?  @db.Text // Mantido apenas caso você queira permitir upload futuro
+  created_at              DateTime @default(now()) @db.Timestamptz(3)
+  
+  // --- RELACIONAMENTOS ---
+  area_id                 String   @db.Uuid
+  area                    EcdWorkerArea @relation(fields: [area_id], references: [id])
+  
+  leader_id               String   @db.Uuid
+  leader                  EcdWorkerLeader @relation(fields: [leader_id], references: [id])
+  
+  // 👇 Nulo na pré-inscrição, preenchido apenas quando você clicar em "Aprovar"
+  edition_id              String?  @db.Uuid
+  edition                 EcdEdition? @relation(fields: [edition_id], references: [id])
+  
+  token_id                String   @unique @db.Uuid
+  token                   EcdWorkerToken @relation(fields: [token_id], references: [id])
+
+  @@map("ecd_worker_registrations")
   @@schema("app")
 }
 

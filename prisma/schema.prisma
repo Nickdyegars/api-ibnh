@@ -459,6 +459,8 @@ model EcdEdition {
   worker_slots  Int      @default(0)
   is_active     Boolean  @default(false)
   created_at    DateTime @default(now()) @db.Timestamptz(3)
+  public_token String?  @unique @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  worker_leaders       EcdWorkerLeader[]
 
   registrations EcdRegistration[] 
   worker_slots_config EcdEditionWorkerSlot[]
@@ -545,6 +547,10 @@ model EcdWorkerLeader {
   
   area_id       String   @db.Uuid
   area          EcdWorkerArea @relation(fields: [area_id], references: [id], onDelete: Cascade)
+  slots         Int      @default(0)
+  
+  edition_id    String   @db.Uuid
+  edition       EcdEdition @relation(fields: [edition_id], references: [id], onDelete: Cascade)
 
   tokens        EcdWorkerToken[]
   registrations EcdWorkerRegistration[]

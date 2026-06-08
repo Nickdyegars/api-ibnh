@@ -52,17 +52,32 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Arquivo ausente.' });
       }
 
-      // 2. TRAVA PÚBLICA: Se for foto de perfil, valida o Token de inscrição.
+      // 2. TRAVA PÚBLICA: Se for foto de perfil, valida o Token.
       if (type === 'profile') {
         if (!providedToken) {
           return reply.status(400).send({ error: 'Token de autorização ausente no formulário.' });
         }
 
-        const isValidToken = await prisma.ecdWorkerToken.findFirst({
-          where: {
-            token_code: String(providedToken) // Força o Prisma a tratar como String, não como UUID
-          }
+        // 👇 BLINDAGEM CONTRA CRASH DO PRISMA 👇
+        // Verifica se o texto enviado tem exatamente o formato de um UUID válido
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(String(providedToken))) {
+          return reply.status(400).send({ error: 'Formato de token inválido. Use um link oficial do evento.' });
+        }
+
+        // Tenta achar o token na tabela de Líderes
+        let isValidToken = await prisma.ecdWorkerToken.findFirst({
+          where: { token_code: String(providedToken) }
         });
+
+        // SE NÃO ACHOU NOS LÍDERES, PROCURA NAS EDIÇÕES
+        if (!isValidToken) {
+          const isEditionToken = await prisma.ecdEdition.findFirst({
+            where: { public_token: String(providedToken) }
+          });
+
+          if (isEditionToken) isValidToken = true as any;
+        }
 
         if (!isValidToken) {
           return reply.status(401).send({ error: 'Token de inscrição inválido. Upload bloqueado.' });
@@ -103,11 +118,13 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
     // Áreas de Trabalho
     childApp.get('/cms/ecd-workers/areas', (req, rep) => controller.getAreas(req, rep));
     childApp.post('/cms/ecd-workers/areas', (req, rep) => controller.createArea(req, rep));
+    childApp.put('/cms/ecd-workers/areas/:id', (req, rep) => controller.updateArea(req, rep));
     childApp.delete('/cms/ecd-workers/areas/:id', (req, rep) => controller.deleteArea(req, rep));
 
     // Líderes de Equipe
     childApp.get('/cms/ecd-workers/leaders', (req, rep) => controller.getLeaders(req, rep));
     childApp.post('/cms/ecd-workers/leaders', (req, rep) => controller.createLeader(req, rep));
+    childApp.put('/cms/ecd-workers/leaders/:id', (req, rep) => controller.updateLeader(req, rep));
     childApp.delete('/cms/ecd-workers/leaders/:id', (req, rep) => controller.deleteLeader(req, rep));
 
     // Fichas (Pré-inscrição e Confirmados)

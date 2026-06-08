@@ -14,34 +14,58 @@ export class EcdWorkersService {
     }
 
     async deleteArea(id: string) {
+        // Verifica se existem líderes vinculados
+        const leadersCount = await prisma.ecdWorkerLeader.count({ where: { area_id: id } });
+        if (leadersCount > 0) throw new Error("Não é possível excluir esta área pois existem líderes vinculados a ela.");
+
         return await prisma.ecdWorkerArea.delete({ where: { id } });
     }
 
+    async updateArea(id: string, name: string) {
+        return await prisma.ecdWorkerArea.update({
+            where: { id },
+            data: { name }
+        });
+    }
+
     // --- LÍDERES E TOKENS ---
-    async getLeaders() {
+    async getLeaders(editionId?: string) {
+        const whereClause = editionId ? { edition_id: editionId } : {};
+
         return await prisma.ecdWorkerLeader.findMany({
-            include: { area: true, tokens: true },
+            where: whereClause,
+            include: {
+                area: true,
+                registrations: { select: { id: true } } // Puxa só os IDs para não pesar
+            },
             orderBy: { name: 'asc' }
         });
     }
 
-    async createLeader(data: WorkerLeaderType) {
-        return await prisma.$transaction(async (tx) => {
-            const leader = await tx.ecdWorkerLeader.create({
-                data: { name: data.name, area_id: data.areaId }
-            });
-
-            const tokens = Array.from({ length: data.slots }).map(() => ({
-                leader_id: leader.id
-            }));
-
-            await tx.ecdWorkerToken.createMany({ data: tokens });
-            return leader;
+    async createLeader(name: string, areaId: string, editionId: string, slots: number) {
+        return await prisma.ecdWorkerLeader.create({
+            data: {
+                name,
+                area_id: areaId,
+                edition_id: editionId,
+                slots: slots // Salva a capacidade máxima
+            }
         });
     }
 
     async deleteLeader(id: string) {
+        // Verifica se existem fichas vinculadas
+        const registrationsCount = await prisma.ecdWorkerRegistration.count({ where: { leader_id: id } });
+        if (registrationsCount > 0) throw new Error("Não é possível excluir este líder pois existem voluntários aprovados vinculados a ele.");
+
         return await prisma.ecdWorkerLeader.delete({ where: { id } });
+    }
+    
+    async updateLeader(id: string, name: string, areaId: string, slots: number) {
+        return await prisma.ecdWorkerLeader.update({
+            where: { id },
+            data: { name, area_id: areaId, slots }
+        });
     }
 
     async validateToken(tokenCode: string) {
@@ -58,12 +82,30 @@ export class EcdWorkersService {
 
     // --- FICHAS DE INSCRIÇÃO ---
     async createRegistration(data: RegisterWorkerType) {
-        const tokenRecord = await prisma.ecdWorkerToken.findUnique({
+        // 1. Tenta encontrar o token na tabela de líderes (Link do Líder)
+        // Mudamos para findFirst para evitar qualquer erro de conversão estrita do Prisma
+        const tokenRecord = await prisma.ecdWorkerToken.findFirst({
             where: { token_code: data.token },
             include: { leader: true }
         });
 
-        if (!tokenRecord) throw new Error("TOKEN_NOT_FOUND");
+        // 2. 👇 A MÁGICA DA UNIFICAÇÃO 👇
+        // Se não encontrou o token nos líderes, verifica se é o Token Público de uma Edição (Link Geral)
+        if (!tokenRecord) {
+            const isEditionToken = await prisma.ecdEdition.findFirst({
+                where: { public_token: data.token }
+            });
+
+            if (isEditionToken) {
+                // Bingo! É o link geral. Encaminha os dados para o método genérico e finaliza
+                return await this.createRegistrationGeneric(data);
+            }
+
+            // Se não achar em nenhuma das duas tabelas, aí sim dispara o erro para o Front-end
+            throw new Error("TOKEN_NOT_FOUND");
+        }
+
+        // 3. Se achou o token de líder, segue o fluxo normal de links individuais...
         if (tokenRecord.is_used) throw new Error("TOKEN_ALREADY_USED");
 
         return await prisma.$transaction(async (tx) => {
@@ -78,7 +120,6 @@ export class EcdWorkersService {
                     bringing_target: data.bringingTarget,
                     relative_participating: data.relativeParticipating,
 
-                    // 👇 A conversão de undefined para null acontece aqui 👇
                     previous_team: data.previousTeam ?? null,
                     target_name: data.targetName ?? null,
                     cell_leader: data.cellLeader ?? null,
@@ -172,32 +213,55 @@ export class EcdWorkersService {
         });
     }
 
-    async createRegistrationGeneric(data: Omit<RegisterWorkerType, 'token'>) {
-        return await prisma.$transaction(async (tx) => {
-            // 1. Procura se existe uma "Área Geral". Se não existir, cria na hora.
-            let areaGeral = await tx.ecdWorkerArea.findFirst({ where: { name: 'Geral' } });
-            if (!areaGeral) {
-                areaGeral = await tx.ecdWorkerArea.create({ data: { name: 'Geral' } });
-            }
+    async createRegistrationGeneric(data: any) {
+        // 1. Descobre qual é a Edição através do Token do link
+        const edition = await prisma.ecdEdition.findFirst({
+            where: { public_token: data.token }
+        });
 
-            // 2. Procura se existe o líder "Administração Geral". Se não existir, cria na hora.
-            let liderGeral = await tx.ecdWorkerLeader.findFirst({ where: { name: 'Administração Geral' } });
-            if (!liderGeral) {
-                liderGeral = await tx.ecdWorkerLeader.create({
-                    data: { name: 'Administração Geral', area_id: areaGeral.id }
-                });
-            }
+        if (!edition) throw new Error("Link da edição expirado ou inválido.");
 
-            // 3. O PULO DO GATO: Cria um token EXCLUSIVO para essa pessoa instantaneamente
-            const novoToken = await tx.ecdWorkerToken.create({
+        // 2. AUTO-REPARO: Garante que a área "Geral" existe no banco
+        let generalArea = await prisma.ecdWorkerArea.findFirst({
+            where: { name: 'Geral' }
+        });
+
+        if (!generalArea) {
+            generalArea = await prisma.ecdWorkerArea.create({
+                data: { name: 'Geral' }
+            });
+        }
+
+        // 3. AUTO-REPARO: Garante que o líder "Administração Geral" existe PARA ESTA EDIÇÃO
+        let adminLeader = await prisma.ecdWorkerLeader.findFirst({
+            where: {
+                name: 'Administração Geral',
+                edition_id: edition.id // Procura especificamente na edição atual
+            }
+        });
+
+        if (!adminLeader) {
+            adminLeader = await prisma.ecdWorkerLeader.create({
                 data: {
-                    leader_id: liderGeral.id,
-                    is_used: true, // Já nasce como usado
-                    usedAt: new Date()
+                    name: 'Administração Geral',
+                    area_id: generalArea.id,
+                    edition_id: edition.id
+                }
+            });
+        }
+
+        // Usamos Transaction para garantir que se a ficha falhar, o token não fica sobrando
+        return await prisma.$transaction(async (tx) => {
+
+            // 4. GERA UM TOKEN DESCARTÁVEL: Satisfaz a regra 1 para 1 do banco
+            const internalToken = await tx.ecdWorkerToken.create({
+                data: {
+                    leader_id: adminLeader.id,
+                    is_used: true // Já nasce usado, pois pertence a esta ficha
                 }
             });
 
-            // 4. Salva a ficha vinculando ao token único recém-criado
+            // 5. CRIA A FICHA (Já vinculada à Edição certa!)
             return await tx.ecdWorkerRegistration.create({
                 data: {
                     full_name: data.fullName,
@@ -212,20 +276,22 @@ export class EcdWorkersService {
                     previous_team: data.previousTeam ?? null,
                     target_name: data.targetName ?? null,
                     cell_leader: data.cellLeader ?? null,
-                    relative_kinship: data.relativeKinship ?? null,
                     emergency_contact: data.emergencyContact ?? null,
                     emergency_phone: data.emergencyPhone ?? null,
                     health_issues: data.healthIssues ?? null,
+                    dietary_restrictions: data.dietaryRestrictions ?? null,
                     observations: data.observations ?? null,
-
                     profile_photo_url: data.profilePhotoUrl ?? null,
                     receipt_photo_url: data.receiptPhotoUrl ?? null,
 
                     status: 'PENDENTE',
                     payment_status: 'PENDENTE',
-                    token_id: novoToken.id, // O Prisma não vai reclamar, pois é um token 100% novo!
-                    leader_id: liderGeral.id,
-                    area_id: areaGeral.id
+
+                    // VÍNCULOS DE ARQUITETURA
+                    edition_id: edition.id,
+                    token_id: internalToken.id,
+                    leader_id: adminLeader.id,
+                    area_id: adminLeader.area_id
                 }
             });
         });

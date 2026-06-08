@@ -47,35 +47,71 @@ export class EcdWorkersController {
 
     async deleteArea(request: FastifyRequest, reply: FastifyReply) {
         try {
-            await service.deleteArea((request.params as any).id);
+            const { id } = request.params as { id: string };
+            await service.deleteArea(id);
             return reply.send({ success: true });
         } catch (error: any) {
-            if (error.code === 'P2003') return reply.status(400).send({ error: 'Existem líderes ou fichas atreladas a esta área.' });
-            return reply.status(500).send({ error: 'Erro ao excluir área.' });
+            return reply.status(400).send({ error: error.message });
+        }
+    }
+
+    async updateArea(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const { id } = request.params as { id: string };
+            const { name } = request.body as { name: string };
+            return reply.send(await service.updateArea(id, name));
+        } catch (error: any) {
+            return reply.status(400).send({ error: error.message });
         }
     }
 
     // --- LÍDERES ---
     async getLeaders(request: FastifyRequest, reply: FastifyReply) {
-        return reply.send(await service.getLeaders());
+        try {
+            // Ex: /cms/ecd-workers/leaders?editionId=1234...
+            const { editionId } = request.query as { editionId?: string };
+
+            return reply.send(await service.getLeaders(editionId));
+        } catch (error) {
+            return reply.status(500).send({ error: 'Erro ao buscar líderes.' });
+        }
     }
 
     async createLeader(request: FastifyRequest, reply: FastifyReply) {
         try {
-            const data = workerLeaderSchema.parse(request.body);
-            return reply.status(201).send(await service.createLeader(data));
+            // Puxa os slots do body
+            const { name, area_id, edition_id, slots } = request.body as any;
+
+            if (!name || !area_id || !edition_id) {
+                return reply.status(400).send({ error: 'Nome, área e edição são obrigatórios.' });
+            }
+
+            // Repassa o slots (convertido para número)
+            const newLeader = await service.createLeader(name, area_id, edition_id, Number(slots) || 0);
+            return reply.status(201).send(newLeader);
         } catch (error) {
+            console.error("Erro ao criar líder:", error);
             return reply.status(500).send({ error: 'Erro ao criar líder.' });
         }
     }
 
     async deleteLeader(request: FastifyRequest, reply: FastifyReply) {
         try {
-            await service.deleteLeader((request.params as any).id);
+            const { id } = request.params as { id: string };
+            await service.deleteLeader(id);
             return reply.send({ success: true });
         } catch (error: any) {
-            if (error.code === 'P2003') return reply.status(400).send({ error: 'Existem fichas atreladas a este líder.' });
-            return reply.status(500).send({ error: 'Erro ao excluir líder.' });
+            return reply.status(400).send({ error: error.message });
+        }
+    }
+
+    async updateLeader(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const { id } = request.params as { id: string };
+            const { name, area_id, slots } = request.body as any;
+            return reply.send(await service.updateLeader(id, name, area_id, Number(slots)));
+        } catch (error: any) {
+            return reply.status(400).send({ error: error.message });
         }
     }
 

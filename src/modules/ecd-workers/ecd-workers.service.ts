@@ -60,7 +60,7 @@ export class EcdWorkersService {
 
         return await prisma.ecdWorkerLeader.delete({ where: { id } });
     }
-    
+
     async updateLeader(id: string, name: string, areaId: string, slots: number) {
         return await prisma.ecdWorkerLeader.update({
             where: { id },
@@ -132,6 +132,7 @@ export class EcdWorkersService {
 
                     profile_photo_url: data.profilePhotoUrl ?? null,
                     receipt_photo_url: data.receiptPhotoUrl ?? null,
+                    audio_record_url: data.audioRecordUrl ?? null,
 
                     status: 'PENDENTE',
                     payment_status: 'PENDENTE',
@@ -195,6 +196,10 @@ export class EcdWorkersService {
 
         if (reg.receipt_photo_url) {
             await deleteImage(reg.receipt_photo_url);
+        }
+
+        if (reg.audio_record_url) {
+            await deleteImage(reg.audio_record_url);
         }
 
         // 3. DELETA DO BANCO E LIBERA O TOKEN
@@ -283,6 +288,7 @@ export class EcdWorkersService {
                     observations: data.observations ?? null,
                     profile_photo_url: data.profilePhotoUrl ?? null,
                     receipt_photo_url: data.receiptPhotoUrl ?? null,
+                    audio_record_url: data.audioRecordUrl ?? null,
 
                     status: 'PENDENTE',
                     payment_status: 'PENDENTE',
@@ -313,6 +319,24 @@ export class EcdWorkersService {
         return await prisma.ecdWorkerRegistration.update({
             where: { id },
             data: dataToUpdate
+        });
+    }
+
+    // Atualiza os dados de texto da ficha (Usado para corrigir dados do Áudio)
+    async updateRegistrationData(id: string, data: any) {
+        return await prisma.ecdWorkerRegistration.update({
+            where: { id },
+            data: {
+                full_name: data.full_name,
+                gender: data.gender,
+                age: Number(data.age),
+                phone: data.phone,
+                marital_status: data.marital_status,
+                emergency_contact: data.emergency_contact,
+                emergency_phone: data.emergency_phone,
+                health_issues: data.health_issues,
+                observations: data.observations
+            }
         });
     }
 }

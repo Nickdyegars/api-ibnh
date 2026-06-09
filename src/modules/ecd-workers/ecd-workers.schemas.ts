@@ -40,6 +40,7 @@ export const registerWorkerSchema = z.object({
 
   profilePhotoUrl: z.string().optional().nullable(),
   receiptPhotoUrl: z.string().optional().nullable(),
+  audioRecordUrl: z.string().optional().nullable(),
 });
 
 export type WorkerAreaType = z.infer<typeof workerAreaSchema>;

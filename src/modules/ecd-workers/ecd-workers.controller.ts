@@ -187,4 +187,14 @@ export class EcdWorkersController {
             return reply.status(500).send({ success: false, message: error.message || 'Erro ao realizar pré-inscrição.' });
         }
     }
+
+    async updateWorkerData(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const { id } = request.params as { id: string };
+            const updated = await service.updateRegistrationData(id, request.body);
+            return reply.send(updated);
+        } catch (error) {
+            return reply.status(500).send({ error: 'Erro ao atualizar dados da ficha.' });
+        }
+    }
 }

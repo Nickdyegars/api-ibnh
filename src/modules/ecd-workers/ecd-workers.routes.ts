@@ -12,6 +12,73 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
   app.get('/public/ecd-workers/validate-token/:token', (req, rep) => controller.validateToken(req as any, rep));
   app.post('/public/ecd-workers/register-generic', (req, rep) => controller.registerGeneric(req, rep));
 
+  // Rota para receber o Áudio da Inscrição (Acessibilidade)
+  app.post('/public/ecd-workers/upload/audio', async (request, reply) => {
+    try {
+      const parts = request.parts();
+      let fileData: any = null;
+      let providedToken: string | null = null;
+
+      // 1. Extrai o arquivo e o token de forma 100% segura para o TypeScript
+      for await (const part of parts) {
+        if (part.type === 'file') {
+          const buffer = await part.toBuffer();
+          fileData = {
+            filename: part.filename,
+            mimetype: part.mimetype,
+            buffer: buffer
+          };
+        } else if (part.fieldname === 'token') {
+          providedToken = part.value as string;
+        }
+      }
+
+      if (!fileData) {
+        return reply.status(400).send({ error: 'Nenhum áudio enviado.' });
+      }
+
+      if (!providedToken) {
+        return reply.status(400).send({ error: 'Token de autorização ausente.' });
+      }
+
+      // 2. TRAVA DE SEGURANÇA
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(String(providedToken))) {
+        return reply.status(400).send({ error: 'Formato de token inválido.' });
+      }
+
+      let isValidToken = await prisma.ecdWorkerToken.findFirst({
+        where: { token_code: String(providedToken) }
+      });
+
+      if (!isValidToken) {
+        const isEditionToken = await prisma.ecdEdition.findFirst({
+          where: { public_token: String(providedToken) }
+        });
+        if (isEditionToken) isValidToken = true as any;
+      }
+
+      if (!isValidToken) {
+        return reply.status(401).send({ error: 'Token de inscrição inválido. Upload bloqueado.' });
+      }
+
+      // 3. UPLOAD PRO MINIO (Usando a função uploadImage existente)
+      const fileName = `audio-${Date.now()}-${fileData.filename}`;
+
+      const audioUrl = await uploadImage(
+        fileName,
+        fileData.buffer,
+        fileData.mimetype,
+        'ecd/audio' // Salva o áudio organizadinho na subpasta
+      );
+
+      return reply.send({ url: audioUrl });
+    } catch (error) {
+      console.error("Erro no upload do áudio:", error);
+      return reply.status(500).send({ error: 'Erro interno ao salvar áudio.' });
+    }
+  });
+
   app.post('/public/ecd-workers/upload/:type', async (request, reply) => {
     try {
       const { type } = request.params as { type: string };
@@ -133,5 +200,6 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
     childApp.patch('/cms/ecd-workers/registrations/:id/reject', (req, rep) => controller.rejectWorker(req, rep));
     childApp.patch('/cms/ecd-workers/registrations/:id/payment', (req, rep) => controller.updatePayment(req, rep));
     childApp.delete('/cms/ecd-workers/registrations/:id', (req, rep) => controller.deleteRegistration(req, rep));
+    childApp.put('/cms/ecd-workers/registrations/:id', (req, rep) => controller.updateWorkerData(req, rep));
   });
 }

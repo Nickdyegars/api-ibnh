@@ -626,6 +626,8 @@ model EcdWorkerRegistration {
   payment_status          String   @default("PENDENTE") @db.VarChar(20) // PENDENTE, PAGO
   receipt_photo_url       String?  @db.Text // Mantido apenas caso você queira permitir upload futuro
   created_at              DateTime @default(now()) @db.Timestamptz(3)
+
+  audio_record_url        String?  @db.Text
   
   // --- RELACIONAMENTOS ---
   area_id                 String   @db.Uuid

@@ -1,6 +1,8 @@
-import { FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyReply, FastifyRequest } from 'fastify';
 import { repertorioService } from './repertorio.service.js';
-import { songSchema, updateSongSchema } from './repertorio.schemas.js'; // 👈 IMPORTADO O UPDATE SCHEMA
+import { songSchema, updateSongSchema } from './repertorio.schemas.js';
+// 👇 Importando o nosso serviço de Auditoria
+import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 export class RepertorioController {
   
@@ -15,8 +17,13 @@ export class RepertorioController {
 
   async createSong(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const validatedData = songSchema.parse(request.body);
-      const song = await repertorioService.createSong(validatedData);
+      const song = await repertorioService.createSong(validatedData) as any;
+
+      // 📝 LOG: Nova música adicionada ao repertório da igreja
+      AuditService.log(requester.sub, 'CREATE', 'SONG', song?.id, validatedData);
+
       return reply.status(201).send(song);
     } catch (error: any) {
       if (error.errors) return reply.status(400).send({ error: error.errors[0].message });
@@ -26,12 +33,15 @@ export class RepertorioController {
 
   async updateSong(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const { id } = request.params as { id: string };
       
-      // 👇 AGORA USA O SCHEMA PARCIAL 👇
       const validatedData = updateSongSchema.parse(request.body);
-
       const song = await repertorioService.updateSong(id, validatedData);
+
+      // 📝 LOG: Alteração na letra, cifra ou metadados da música
+      AuditService.log(requester.sub, 'UPDATE', 'SONG', id, validatedData);
+
       return reply.send(song);
     } catch (error: any) {
       if (error.errors) return reply.status(400).send({ error: error.errors[0].message });
@@ -41,8 +51,14 @@ export class RepertorioController {
 
   async deleteSong(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const { id } = request.params as { id: string };
+      
       await repertorioService.deleteSong(id);
+
+      // 📝 LOG: Remoção definitiva da música do repertório
+      AuditService.log(requester.sub, 'DELETE', 'SONG', id);
+
       return reply.send({ message: 'Música removida do repertório.' });
     } catch (error) {
       return reply.status(400).send({ error: 'Erro ao remover música.' });

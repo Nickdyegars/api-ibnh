@@ -1,6 +1,8 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthService } from './auth.service.js';
 import { registerSchema, loginSchema, updateUserSchema, firstAccessPasswordSchema } from './auth.schemas.js';
+// 👇 1. Importando o nosso serviço de Auditoria 👇
+import { AuditService } from '../../shared/services/audit/audit.service.js'; 
 
 const authService = new AuthService();
 
@@ -8,19 +10,23 @@ export class AuthController {
 
   async register(request: FastifyRequest, reply: FastifyReply) {
     try {
-      // 👇 TRAVA DE SEGURANÇA MÁXIMA 👇
       const requester = request.user as any;
       if (requester.level !== 0) {
         return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem criar novos usuários.' });
       }
 
-      // 1. Valida o body usando o Zod Schema
       const data = registerSchema.parse(request.body);
-
-      // 2. Chama o Service
       const user = await authService.register(data);
 
-      // 3. Retorna a resposta de sucesso
+      // 📝 LOG DE AUDITORIA: Quem criou e quem foi criado
+      AuditService.log(
+        requester.sub,                 // Quem fez (Admin)
+        'CREATE',                      // Ação
+        'USER',                        // Onde
+        user.id,                       // ID do novo usuário criado
+        { email: user.email, level: user.user_level } // O que foi criado
+      );
+
       return reply.status(201).send({
         message: 'Usuário criado com sucesso!',
         user: {
@@ -51,6 +57,15 @@ export class AuthController {
         ministry_access: user.ministry_access
       });
 
+      // 📝 LOG DE AUDITORIA: Como no login não temos request.user ainda (pois ele está entrando agora), usamos o ID do próprio usuário retornado pelo banco.
+      AuditService.log(
+        user.id,                       // O próprio usuário
+        'LOGIN',                       // Ação
+        'AUTH',                        // Onde
+        user.id,                       // ID do recurso
+        { email: user.email }          // Detalhes extras
+      );
+
       return reply.send({
         token,
         user: {
@@ -58,7 +73,6 @@ export class AuthController {
           email: user.email,
           level: user.user_level,
           ministry_access: user.ministry_access,
-          // 👇 INCLUÍDA A FLAG DE TROCA DE SENHA 👇
           mustChangePassword: user.must_change_password
         }
       });
@@ -70,13 +84,20 @@ export class AuthController {
     }
   }
 
-  // 👇 NOVO MÉTODO PARA A REDEFINIÇÃO 👇
   async updateFirstPassword(request: FastifyRequest, reply: FastifyReply) {
     try {
       const user = request.user as any;
       const { newPassword } = firstAccessPasswordSchema.parse(request.body);
 
       await authService.updateFirstPassword(user.sub, newPassword);
+
+      // 📝 LOG DE AUDITORIA: Usuário trocou a senha padrão
+      AuditService.log(
+        user.sub,
+        'UPDATE_FIRST_PASSWORD',
+        'AUTH',
+        user.sub
+      );
 
       return reply.send({ message: 'Senha atualizada com sucesso!' });
     } catch (error: any) {
@@ -89,7 +110,6 @@ export class AuthController {
 
   async getUsers(request: FastifyRequest, reply: FastifyReply) {
     try {
-      // 👇 TRAVA DE PRIVACIDADE (Apenas Admins veem a lista de todos) 👇
       const requester = request.user as any;
       if (requester.level !== 0) {
         return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem listar os usuários do sistema.' });
@@ -105,25 +125,30 @@ export class AuthController {
   async updateUser(request: FastifyRequest, reply: FastifyReply) {
     try {
       const { id } = request.params as { id: string };
-      const requester = request.user as any; // 👈 Puxamos os dados de quem fez a requisição
+      const requester = request.user as any;
 
-      // 1. TRAVA DE SEGURANÇA (IDOR):
-      // Se não for Admin (level 0) E estiver tentando editar um ID diferente do seu próprio, BLOQUEIA.
       if (requester.level !== 0 && requester.sub !== id) {
         return reply.status(403).send({ error: 'Acesso negado. Você só pode atualizar o seu próprio perfil.' });
       }
 
-      // Valida os dados enviados
       const data = updateUserSchema.parse(request.body);
 
-      // 2. TRAVA DE ESCALADA DE PRIVILÉGIO:
-      // Se um líder (nível > 0) estiver editando a si mesmo, ele NÃO PODE se dar permissão de Admin na marra.
       if (requester.level !== 0) {
         delete data.role;
         delete data.ministry;
       }
 
       const user = await authService.updateUser(id, data);
+
+      // 📝 LOG DE AUDITORIA: Edição de dados
+      // Passamos o "data" no detalhe para saber exatamente quais campos foram alterados!
+      AuditService.log(
+        requester.sub,
+        'UPDATE',
+        'USER',
+        id,
+        data 
+      );
 
       return reply.send({ message: 'Usuário atualizado com sucesso!', user });
     } catch (error: any) {
@@ -137,20 +162,25 @@ export class AuthController {
   async deleteUser(request: FastifyRequest, reply: FastifyReply) {
     try {
       const { id } = request.params as { id: string };
-      const requester = request.user as any; // 👈 Puxamos os dados de quem fez a requisição
+      const requester = request.user as any;
 
-      // 1. TRAVA DE SEGURANÇA (RBAC): Apenas Admins podem apagar contas
       if (requester.level !== 0) {
         return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem excluir usuários.' });
       }
 
-      // 2. PREVENÇÃO DE AUTO-EXCLUSÃO (Opcional, mas recomendado)
-      // Evita que o Admin apague o próprio usuário por acidente e perca o acesso ao sistema
       if (requester.sub === id) {
         return reply.status(400).send({ error: 'Você não pode excluir sua própria conta por segurança.' });
       }
 
       await authService.deleteUser(id);
+
+      // 📝 LOG DE AUDITORIA: Conta apagada (Extremamente importante)
+      AuditService.log(
+        requester.sub,
+        'DELETE',
+        'USER',
+        id
+      );
 
       return reply.send({ message: 'Usuário apagado com sucesso!' });
     } catch (error: any) {

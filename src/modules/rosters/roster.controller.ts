@@ -3,6 +3,8 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { RosterService } from './roster.service.js';
 import { getRostersQuerySchema, createRosterBodySchema } from './roster.schemas.js';
 import { prisma } from '../../shared/database/prisma.js';
+// 👇 Importando o nosso serviço de Auditoria
+import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 const rosterService = new RosterService();
 
@@ -15,7 +17,6 @@ export class RosterController {
 
             // === TRAVA DE SEGURANÇA (RBAC) ===
             if (user.level > 0) {
-                // Agora o backend pega o ministry_access do token!
                 const userMinistryName = user.ministry_access || user.ministry || '';
 
                 const userMin = userMinistryName.trim().toLowerCase();
@@ -31,7 +32,11 @@ export class RosterController {
             }
             // =================================
 
-            const newRoster = await rosterService.createRoster(data);
+            const newRoster = await rosterService.createRoster(data) as any;
+
+            // 📝 LOG: Geração e publicação de uma nova escala ministerial
+            AuditService.log(user.sub, 'CREATE', 'ROSTER', newRoster?.id, data);
+
             return reply.status(201).send(newRoster);
         } catch (error: any) {
             console.error("Erro ao criar escala:", error);
@@ -41,12 +46,11 @@ export class RosterController {
 
     async generatePreview(request: FastifyRequest, reply: FastifyReply) {
         try {
-            const user = request.user as any; // Pegamos quem está logado
+            const user = request.user as any; 
             const data = request.body as any;
 
             // === TRAVA DE SEGURANÇA (RBAC) ===
             if (user.level > 0) {
-                // Agora o backend pega o ministry_access do token!
                 const userMinistryName = user.ministry_access || user.ministry || '';
 
                 const userMin = userMinistryName.trim().toLowerCase();
@@ -87,7 +91,6 @@ export class RosterController {
 
             // === TRAVA DE SEGURANÇA (RBAC) ===
             if (user.level > 0) {
-                // Precisamos buscar a escala no banco rapidinho só para saber de qual ministério ela é
                 const schedule = await prisma.schedule.findUnique({
                     where: { id },
                     include: { ministry: true }
@@ -110,6 +113,10 @@ export class RosterController {
             // =================================
 
             await rosterService.deleteRoster(id);
+
+            // 📝 LOG: Escala ministerial apagada do sistema
+            AuditService.log(user.sub, 'DELETE', 'ROSTER', id);
+
             return reply.send({ message: 'Escala apagada com sucesso' });
         } catch (error: any) {
             return reply.status(400).send({ error: 'Erro ao apagar escala' });
@@ -122,7 +129,6 @@ export class RosterController {
             const { shiftId } = request.params as { shiftId: string };
             const { team } = request.body as { team: string[] };
 
-            // Busca o turno rapidinho só para sabermos de qual ministério ele é
             const shift = await prisma.shift.findUnique({
                 where: { id: shiftId },
                 include: { schedule: { include: { ministry: true } } }
@@ -147,11 +153,14 @@ export class RosterController {
             // =================================
 
             const result = await rosterService.updateShiftTeam(shiftId, team);
+
+            // 📝 LOG: Alteração manual de voluntários dentro de um turno (Edição rápida)
+            AuditService.log(user.sub, 'UPDATE_SHIFT', 'ROSTER', shiftId, { team });
+
             return reply.send(result);
         } catch (error: any) {
             console.error("Erro ao editar turno:", error);
             return reply.status(400).send({ error: error.message || 'Erro ao editar escala' });
         }
     }
-
 }

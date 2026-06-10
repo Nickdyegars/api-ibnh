@@ -1,6 +1,8 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { MemberService } from './member.service.js';
 import { memberBodySchema } from './member.schemas.js';
+// 👇 Importando o nosso serviço de Auditoria
+import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 const memberService = new MemberService();
 
@@ -21,7 +23,6 @@ export class MemberController {
       const data = memberBodySchema.parse(request.body);
 
       // 👇 TRAVA DE SEGURANÇA INTER-MINISTÉRIO 👇
-      // Se não for Admin (0), ele só pode cadastrar no próprio ministério (ou 'all' se tiver acesso total)
       if (requester.level !== 0 && requester.ministry_access !== 'all') {
         if (data.ministry !== requester.ministry_access) {
           return reply.status(403).send({ 
@@ -30,7 +31,11 @@ export class MemberController {
         }
       }
 
-      const newMember = await memberService.createMember(data);
+      const newMember = await memberService.createMember(data) as any;
+
+      // 📝 LOG: Cadastro de um novo membro no sistema
+      AuditService.log(requester.sub, 'CREATE', 'MEMBER', newMember?.id, data);
+
       return reply.status(201).send(newMember);
     } catch (error: any) {
       return reply.status(400).send({ error: error.message });
@@ -53,6 +58,10 @@ export class MemberController {
       }
 
       const updatedMember = await memberService.updateMember(id, data);
+
+      // 📝 LOG: Atualização de dados cadastrais do membro
+      AuditService.log(requester.sub, 'UPDATE', 'MEMBER', id, data);
+
       return reply.send(updatedMember);
     } catch (error: any) {
       return reply.status(400).send({ error: error.message });
@@ -64,13 +73,16 @@ export class MemberController {
       const requester = request.user as any;
       const { id } = request.params as { id: string };
 
-      // 👇 TRAVA DE EXCLUSÃO (Recomendado: Apenas Admins podem apagar de verdade) 👇
-      // Se quiser que o líder possa apagar, basta mudar para verificar o ministério
+      // 👇 TRAVA DE EXCLUSÃO 👇
       if (requester.level !== 0) {
          return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem excluir membros do banco de dados.' });
       }
 
       await memberService.deleteMember(id);
+
+      // 📝 LOG: Exclusão permanente de membro do rol da igreja
+      AuditService.log(requester.sub, 'DELETE', 'MEMBER', id);
+
       return reply.send({ message: 'Membro apagado com sucesso' });
     } catch (error: any) {
       console.error("🔥 Erro ao deletar membro no banco:", error);

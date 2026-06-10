@@ -3,6 +3,8 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { CommunityBusinessService } from './community-business.service.js';
 import { communityBusinessSchema, updateCommunityBusinessSchema } from './community-business.schemas.js';
 import { uploadImage } from '../../shared/storage/minio.js';
+// 👇 Importando o nosso serviço de Auditoria
+import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 const businessService = new CommunityBusinessService();
 
@@ -30,8 +32,13 @@ export class CommunityBusinessController {
 
     async create(request: FastifyRequest, reply: FastifyReply) {
         try {
+            const requester = request.user as any;
             const data = communityBusinessSchema.parse(request.body);
-            const newBusiness = await businessService.create(data);
+            const newBusiness = await businessService.create(data) as any;
+
+            // 📝 LOG: Cadastro de empresa via Painel Admin
+            AuditService.log(requester.sub, 'CREATE', 'COMMUNITY_BUSINESS', newBusiness?.id, data);
+
             return reply.status(201).send(newBusiness);
         } catch (error: any) {
             return reply.status(400).send({ error: error.message });
@@ -40,9 +47,14 @@ export class CommunityBusinessController {
 
     async update(request: FastifyRequest, reply: FastifyReply) {
         try {
+            const requester = request.user as any;
             const { id } = request.params as { id: string };
             const data = updateCommunityBusinessSchema.parse(request.body);
             const updated = await businessService.update(id, data);
+
+            // 📝 LOG: Atualização de dados/aprovação da empresa
+            AuditService.log(requester.sub, 'UPDATE', 'COMMUNITY_BUSINESS', id, data);
+
             return reply.send(updated);
         } catch (error: any) {
             return reply.status(400).send({ error: error.message });
@@ -51,23 +63,25 @@ export class CommunityBusinessController {
 
     async delete(request: FastifyRequest, reply: FastifyReply) {
         try {
+            const requester = request.user as any;
             const { id } = request.params as { id: string };
             await businessService.delete(id);
+
+            // 📝 LOG: Exclusão permanente de empresa do guia
+            AuditService.log(requester.sub, 'DELETE', 'COMMUNITY_BUSINESS', id);
+
             return reply.send({ message: 'Negócio e imagem apagados com sucesso' });
         } catch (error: any) {
-            // 👇 AGORA O SEU TERMINAL VAI MOSTRAR O ERRO REAL 👇
             console.error("❌ Erro ao deletar negócio:", error);
             return reply.status(400).send({ error: error.message || 'Erro ao apagar negócio' });
         }
     }
 
-async uploadLogo(request: FastifyRequest, reply: FastifyReply) {
+    async uploadLogo(request: FastifyRequest, reply: FastifyReply) {
         try {
-            // 👇 1. A TRAVA DE SEGURANÇA (Máx: 5MB) 👇
-            // Isso impede ataques de esgotamento de memória (DDoS)
             const data = await request.file({
                 limits: {
-                    fileSize: 5 * 1024 * 1024, // 5 Megabytes em bytes
+                    fileSize: 5 * 1024 * 1024,
                 }
             });
 
@@ -75,14 +89,12 @@ async uploadLogo(request: FastifyRequest, reply: FastifyReply) {
                 return reply.status(400).send({ error: 'Nenhum arquivo enviado.' });
             }
 
-            // 👇 2. VERIFICA SE O ARQUIVO FOI CORTADO PELO LIMITE 👇
             if (data.file.truncated) {
                 return reply.status(400).send({ 
                     error: 'A imagem é muito grande. O tamanho máximo permitido é de 5MB.' 
                 });
             }
 
-            // 3. LISTA VIP DE ARQUIVOS (Apenas imagens seguras)
             const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
 
             if (!allowedMimeTypes.includes(data.mimetype)) {
@@ -91,15 +103,12 @@ async uploadLogo(request: FastifyRequest, reply: FastifyReply) {
                 });
             }
 
-            // Agora é seguro converter para buffer, pois garantimos que tem no máximo 5MB
             const buffer = await data.toBuffer();
 
-            // Trava de Arquivo Vazio
             if (buffer.length === 0) {
                 return reply.status(400).send({ error: 'O arquivo enviado está vazio.' });
             }
 
-            // Usa a sua função pronta, guardando na pasta 'empreendedores'
             const fileUrl = await uploadImage(data.filename, buffer, data.mimetype, 'empreendedores');
 
             return reply.send({ url: fileUrl });
@@ -114,12 +123,10 @@ async uploadLogo(request: FastifyRequest, reply: FastifyReply) {
             const { id } = request.params;
             const { platform } = request.body;
 
-            // Proteção básica para garantir que só aceitamos 'whatsapp' ou 'instagram'
             if (platform !== 'whatsapp' && platform !== 'instagram') {
                 return reply.status(400).send({ error: "Plataforma inválida para registro de clique." });
             }
 
-            // Chama o service para incrementar
             await businessService.registerClick(id, platform);
 
             return reply.status(200).send({ success: true });
@@ -129,23 +136,16 @@ async uploadLogo(request: FastifyRequest, reply: FastifyReply) {
         }
     }
 
-    // Adicione junto das outras funções públicas no community-business.controller.ts
     async registerPublic(request: FastifyRequest, reply: FastifyReply) {
         try {
-            // 1. Valida os dados usando o Schema Zod para não entrar "lixo" no banco
             const data = communityBusinessSchema.parse(request.body);
-
-            // 2. A CHAVE MESTRA DA SEGURANÇA:
-            // Forçamos o negócio a nascer inativo (pendente), não importa o que o "hacker" mandou no JSON
             data.is_active = false;
 
-            // 3. Cria o registro
             const newBusiness = await businessService.create(data);
             return reply.status(201).send(newBusiness);
 
         } catch (error: any) {
             console.error("Erro no cadastro público:", error);
-            // Se for erro do Zod, enviamos a mensagem bonitinha do primeiro erro
             if (error.errors) {
                 return reply.status(400).send({ error: error.errors[0].message });
             }

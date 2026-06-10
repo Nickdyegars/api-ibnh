@@ -1,10 +1,13 @@
 // src/modules/landing-config/landing-config.controller.ts
 import { LandingConfigService } from './landing-config.service.js';
 import { updateLandingConfigSchema } from './landing-config.schemas.js';
+// 👇 Importando o nosso serviço de Auditoria
+import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 export class LandingConfigController {
     private landingConfigService = new LandingConfigService();
 
+    // Rota Pública
     async getPublicConfig(request: any, reply: any) {
         try {
             const config = await this.landingConfigService.getConfig();
@@ -17,20 +20,23 @@ export class LandingConfigController {
 
     async updateConfig(request: any, reply: any) {
         try {
-            // 👇 A validação do Zod acontece aqui! 
-            // Se o painel enviar dados errados, o parse() atira um erro e cai direto no catch
+            const requester = request.user as any;
+            
+            // Validação do Zod
             const data = updateLandingConfigSchema.parse(request.body);
             
-            const updatedConfig = await this.landingConfigService.updateConfig(data);
+            const updatedConfig = await this.landingConfigService.updateConfig(data) as any;
             
+            // 📝 LOG: Alteração nas configurações globais da Landing Page
+            AuditService.log(requester.sub, 'UPDATE', 'LANDING_CONFIG', updatedConfig?.id, data);
+
             return reply.status(200).send(updatedConfig);
         } catch (error: any) {
             console.error("Erro ao atualizar Landing Page Config:", error);
             
-            // Retorna status 400 (Bad Request) se a validação do Zod falhar
             return reply.status(400).send({ 
                 error: "Dados inválidos.", 
-                details: error.errors // Opcional: devolve qual campo falhou para ajudar no debug
+                details: error.errors 
             });
         }
     }

@@ -2,11 +2,14 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { EcdService } from './ecd.service.js';
 import { registerEcdSchema, editionEcdSchema } from './ecd.schemas.js';
+// 👇 Importando o nosso serviço de Auditoria
+import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 const ecdService = new EcdService();
 
 export class EcdController {
 
+  // Rota Pública: Inscrição de Encontrista
   async register(request: FastifyRequest, reply: FastifyReply) {
     try {
       const parts = request.parts();
@@ -58,14 +61,22 @@ export class EcdController {
 
   async createLeader(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const { name, yellowSlots, greenSlots } = request.body as any;
       if (!name) return reply.status(400).send({ error: 'Nome do líder é obrigatório' });
-      return reply.status(201).send(await ecdService.createLeaderWithTokens(name, Number(yellowSlots), Number(greenSlots)));
+      
+      const result = await ecdService.createLeaderWithTokens(name, Number(yellowSlots), Number(greenSlots)) as any;
+
+      // 📝 LOG: Geração de líder e seus links de inscrição
+      AuditService.log(requester.sub, 'CREATE', 'ECD_LEADER', result?.id, { name, yellowSlots, greenSlots });
+
+      return reply.status(201).send(result);
     } catch (error) {
       return reply.status(500).send({ error: 'Erro ao gerar fichas' });
     }
   }
 
+  // Rota Pública
   async validateToken(request: FastifyRequest<{ Params: { token: string } }>, reply: FastifyReply) {
     try {
       return reply.send(await ecdService.validateToken(request.params.token));
@@ -78,9 +89,14 @@ export class EcdController {
 
   async updatePayment(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const { id } = request.params as { id: string };
       const { status } = request.body as { status: string };
       const updated = await ecdService.updatePaymentStatus(id, status);
+
+      // 📝 LOG: Atualização financeira do encontrista
+      AuditService.log(requester.sub, 'UPDATE_PAYMENT', 'ECD_REGISTRATION', id, { status });
+
       return reply.send({ success: true, payment_status: updated.payment_status });
     } catch (error) {
       return reply.status(500).send({ error: 'Erro ao atualizar pagamento' });
@@ -89,10 +105,17 @@ export class EcdController {
 
   async updateLeader(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const { id } = request.params as { id: string };
       const { name, yellowSlots, greenSlots } = request.body as any;
       if (!name) return reply.status(400).send({ error: 'Nome do líder é obrigatório' });
-      return reply.send(await ecdService.updateLeader(id, name, Number(yellowSlots), Number(greenSlots)));
+
+      const updated = await ecdService.updateLeader(id, name, Number(yellowSlots), Number(greenSlots));
+
+      // 📝 LOG: Alteração nos dados ou cotas de vagas do líder
+      AuditService.log(requester.sub, 'UPDATE', 'ECD_LEADER', id, { name, yellowSlots, greenSlots });
+
+      return reply.send(updated);
     } catch (error: any) {
       return reply.status(400).send({ error: error.message || 'Erro ao atualizar líder' });
     }
@@ -100,7 +123,13 @@ export class EcdController {
 
   async deleteLeader(request: FastifyRequest, reply: FastifyReply) {
     try {
-      await ecdService.deleteLeader((request.params as any).id);
+      const requester = request.user as any;
+      const { id } = request.params as { id: string };
+      await ecdService.deleteLeader(id);
+
+      // 📝 LOG: Remoção de líder do ECD
+      AuditService.log(requester.sub, 'DELETE', 'ECD_LEADER', id);
+
       return reply.send({ success: true, message: 'Líder excluído com sucesso' });
     } catch (error: any) {
       if (error.code === 'P2003') return reply.status(400).send({ error: 'Existem fichas atreladas a este líder.' });
@@ -110,7 +139,13 @@ export class EcdController {
 
   async deleteRegistration(request: FastifyRequest, reply: FastifyReply) {
     try {
-      await ecdService.deleteRegistration((request.params as any).id);
+      const requester = request.user as any;
+      const { id } = request.params as { id: string };
+      await ecdService.deleteRegistration(id);
+
+      // 📝 LOG: Exclusão permanente da ficha de inscrição
+      AuditService.log(requester.sub, 'DELETE', 'ECD_REGISTRATION', id);
+
       return reply.send({ success: true, message: 'Ficha excluída!' });
     } catch (error: any) {
       return reply.status(500).send({ error: 'Erro ao excluir a ficha.' });
@@ -119,10 +154,17 @@ export class EcdController {
 
   async completeRegistration(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const { id } = request.params as { id: string };
       const { edition_id } = request.body as { edition_id: string };
       if (!edition_id) return reply.status(400).send({ error: 'O ID da edição é obrigatório.' });
-      return reply.send({ success: true, registration: await ecdService.markAsCompleted(id, edition_id) });
+
+      const result = await ecdService.markAsCompleted(id, edition_id);
+
+      // 📝 LOG: Encontrista movido para o histórico da edição concluída
+      AuditService.log(requester.sub, 'COMPLETE_REGISTRATION', 'ECD_REGISTRATION', id, { edition_id });
+
+      return reply.send({ success: true, registration: result });
     } catch (error) {
       return reply.status(500).send({ error: 'Erro ao mover ficha para o histórico.' });
     }
@@ -139,8 +181,14 @@ export class EcdController {
 
   async createEdition(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const data = editionEcdSchema.parse(request.body);
-      return reply.status(201).send(await ecdService.createEdition(data));
+      const result = await ecdService.createEdition(data) as any;
+
+      // 📝 LOG: Criação de uma nova edição geral do evento
+      AuditService.log(requester.sub, 'CREATE', 'ECD_EDITION', result?.id, data);
+
+      return reply.status(201).send(result);
     } catch (error: any) {
       if (error instanceof z.ZodError) return reply.status(400).send({ error: "Dados inválidos", details: error.format() });
       if (error.code === 'P2002') return reply.status(400).send({ error: 'Já existe uma edição com este nome.' });
@@ -150,9 +198,15 @@ export class EcdController {
 
   async updateEdition(request: FastifyRequest, reply: FastifyReply) {
     try {
+      const requester = request.user as any;
       const { id } = request.params as { id: string };
       const data = editionEcdSchema.parse(request.body);
-      return reply.send(await ecdService.updateEdition(id, data));
+      const result = await ecdService.updateEdition(id, data);
+
+      // 📝 LOG: Alteração dos metadados de uma edição ativa/passada
+      AuditService.log(requester.sub, 'UPDATE', 'ECD_EDITION', id, data);
+
+      return reply.send(result);
     } catch (error: any) {
       if (error instanceof z.ZodError) return reply.status(400).send({ error: "Dados inválidos", details: error.format() });
       if (error.code === 'P2002') return reply.status(400).send({ error: 'Já existe uma edição com este nome.' });
@@ -162,7 +216,13 @@ export class EcdController {
 
   async deleteEdition(request: FastifyRequest, reply: FastifyReply) {
     try {
-      await ecdService.deleteEdition((request.params as any).id);
+      const requester = request.user as any;
+      const { id } = request.params as { id: string };
+      await ecdService.deleteEdition(id);
+
+      // 📝 LOG: Deleção de edição do banco
+      AuditService.log(requester.sub, 'DELETE', 'ECD_EDITION', id);
+
       return reply.send({ success: true });
     } catch (error: any) {
       if (error.code === 'P2003') return reply.status(400).send({ error: 'Existem fichas de histórico atreladas a esta edição.' });

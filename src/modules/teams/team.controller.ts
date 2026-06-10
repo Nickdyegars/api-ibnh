@@ -1,6 +1,9 @@
+// src/modules/teams/team.controller.ts
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { TeamService } from './team.service.js';
 import { teamBodySchema, getTeamsQuerySchema } from './team.schemas.js';
+// 👇 Importando o nosso serviço de Auditoria
+import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 const teamService = new TeamService();
 
@@ -37,7 +40,11 @@ export class TeamController {
             }
             // ==========================
 
-            const newTeam = await teamService.createTeam(name, ministry);
+            const newTeam = await teamService.createTeam(name, ministry) as any;
+
+            // 📝 LOG: Nova banda/equipe integrada a um ministério
+            AuditService.log(user.sub, 'CREATE', 'TEAM', newTeam?.id, { name, ministry });
+
             return reply.status(201).send(newTeam);
         } catch (error: any) {
             console.error("ERRO AO CRIAR BANDA:", error);
@@ -53,8 +60,6 @@ export class TeamController {
             // === TRAVA DE SEGURANÇA ===
             if (user.level > 0) {
                 const userMinistryName = user.ministry_access || user.ministry || '';
-                // Para deletar, a pessoa tem que ser do Louvor (ou do ministério alvo). 
-                // Como a rota delete não recebe o nome do ministério no body, travamos para o ministério do usuário logado.
                 if (userMinistryName !== 'Louvor') {
                     return reply.status(403).send({ error: 'Acesso negado.' });
                 }
@@ -62,6 +67,10 @@ export class TeamController {
             // ==========================
 
             await teamService.deleteTeam(id);
+
+            // 📝 LOG: Remoção de banda/equipe do sistema
+            AuditService.log(user.sub, 'DELETE', 'TEAM', id);
+
             return reply.send({ message: 'Equipe apagada com sucesso' });
         } catch (error: any) {
             return reply.status(400).send({ error: 'Erro ao apagar equipe' });

@@ -664,3 +664,30 @@ model RepertoireSong {
   @@map("repertoire_songs")
   @@schema("app")
 }
+
+model AuditLog {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  
+  // Quem fez a ação? (Puxa o ID do admin logado)
+  user_id     String   @db.Uuid 
+  
+  // O que ele fez? (ex: "CREATE", "UPDATE", "DELETE", "APPROVE")
+  action      String   @db.VarChar(50)
+  
+  // Onde ele fez? (ex: "ECD_WORKER", "ECD_AREA", "CELL")
+  resource    String   @db.VarChar(50)
+  
+  // Qual o ID do item que sofreu a ação?
+  resource_id String?  @db.VarChar(255)
+  
+  // Um campo JSON para guardar os dados (ex: o que foi alterado)
+  details     Json?    
+  
+  created_at  DateTime @default(now())
+
+  @@index([user_id])
+  @@index([resource])
+  
+  // 👇 ADICIONE ESTA LINHA PARA RESOLVER O ERRO 👇
+  @@schema("app") 
+}

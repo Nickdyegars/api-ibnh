@@ -53,13 +53,19 @@ app.register(helmet, {
   }
 });
 
+// app.register(cors, {
+//   origin: [
+//     "https://painel.ibnhitamaraju.com.br",
+//     "https://ibnhitamaraju.com.br",
+//     "http://localhost:5173",
+//     "http://localhost:5174" // Seu ambiente local do Vite
+//   ],
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Libera os métodos
+//   allowedHeaders: ['Content-Type', 'Authorization'] // Libera o envio do Token
+// });
+
 app.register(cors, {
-  origin: [
-    "https://painel.ibnhitamaraju.com.br",
-    "https://ibnhitamaraju.com.br",
-    "http://localhost:5173",
-    "http://localhost:5174" // Seu ambiente local do Vite
-  ],
+  origin: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Libera os métodos
   allowedHeaders: ['Content-Type', 'Authorization'] // Libera o envio do Token
 });

@@ -6,7 +6,7 @@ export async function repertorioRoutes(app: FastifyInstance) {
   // ==========================================
   // ROTA PÚBLICA (Qualquer um pode ver o repertório)
   // ==========================================
-  app.get('/repertorio', (req, rep) => repertorioController.getSongs(req, rep));
+  app.get('/', (req, rep) => repertorioController.getSongs(req, rep));
 
   // ==========================================
   // ROTAS PROTEGIDAS (Apenas Admin logados)
@@ -30,8 +30,8 @@ export async function repertorioRoutes(app: FastifyInstance) {
       }
     });
 
-    protectedApp.post('/repertorio', (req, rep) => repertorioController.createSong(req, rep));
-    protectedApp.put('/repertorio/:id', (req, rep) => repertorioController.updateSong(req, rep));
-    protectedApp.delete('/repertorio/:id', (req, rep) => repertorioController.deleteSong(req, rep));
+    protectedApp.post('/', (req, rep) => repertorioController.createSong(req, rep));
+    protectedApp.put('/:id', (req, rep) => repertorioController.updateSong(req, rep));
+    protectedApp.delete('/:id', (req, rep) => repertorioController.deleteSong(req, rep));
   });
 }

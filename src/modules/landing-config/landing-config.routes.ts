@@ -6,7 +6,7 @@ export async function landingConfigRoutes(app: FastifyInstance) {
   const controller = new LandingConfigController();
 
   // ROTA PÚBLICA (Usada para exibir o botão no site)
-  app.get('/public/landing-config', (req, rep) => controller.getPublicConfig(req, rep));
+  app.get('/public', (req, rep) => controller.getPublicConfig(req, rep));
 
   // ROTAS PRIVADAS (Requer Login no Painel)
   app.register(async function privateRoutes(childApp) {
@@ -20,6 +20,6 @@ export async function landingConfigRoutes(app: FastifyInstance) {
     });
 
     // Rota para o painel salvar a nova configuração do botão
-    childApp.put('/cms/landing-config', (req, rep) => controller.updateConfig(req, rep));
+    childApp.put('/', (req, rep) => controller.updateConfig(req, rep));
   });
 }

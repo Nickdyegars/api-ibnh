@@ -25,6 +25,7 @@ export class MemberService {
     return members.map(m => ({
       id: m.id,
       name: m.name,
+      email: m.email,
       phone: m.phone,
       role: m.role,
       teamName: m.team?.name, // Agora o TypeScript sabe que 'team' existe!
@@ -39,6 +40,7 @@ export class MemberService {
     const member = await prisma.member.create({
       data: {
         name: data.name,
+        email: data.email || null,
         phone: data.phone ?? null,
         role: data.role ?? null,
         team_id: data.team ?? null,
@@ -50,6 +52,7 @@ export class MemberService {
     return {
       id: member.id,
       name: member.name,
+      email: member.email,
       phone: member.phone,
       role: member.role, // 👈 RETORNA
       ministry: member.ministry?.name,
@@ -65,6 +68,7 @@ export class MemberService {
       data: {
         name: data.name,
         phone: data.phone ?? null,
+        email: data.email ?? null,
         role: data.role ?? null,
         team_id: data.team ?? null, // 👈 SALVAR A EQUIPA
         ministry_id: ministryId
@@ -75,6 +79,7 @@ export class MemberService {
     return {
       id: member.id,
       name: member.name,
+      email: member.email,
       phone: member.phone,
       role: member.role, // 👈 RETORNA
       ministry: member.ministry?.name,

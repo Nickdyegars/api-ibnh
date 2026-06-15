@@ -1,6 +1,9 @@
-// src/modules/rosters/roster.service.ts
 import { prisma } from '../../shared/database/prisma.js';
 import { CreateRosterBodyType } from './roster.schemas.js';
+import axios from 'axios'; // Para enviar o JSON para o n8n
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 export class RosterService {
 
@@ -12,24 +15,26 @@ export class RosterService {
 
         if (!ministry) throw new Error(`Ministério '${data.ministry}' não encontrado no banco.`);
 
-        // 2. Busca todos os membros desse ministério para pegarmos os IDs
+        // 2. Busca os membros salvando o OBJETO TODO para termos acesso ao E-mail!
         const membersList = await prisma.member.findMany({
             where: { ministry_id: ministry.id }
         });
-        const memberMap = new Map(membersList.map(m => [m.name, m.id]));
+        // IMPORTANTE: Assumimos que a tabela Member no Prisma possui a coluna 'email'
+        const memberMap = new Map(membersList.map(m => [m.name, m]));
 
         // 3. Cria a Escala Principal (Schedule)
         const schedule = await prisma.schedule.create({
             data: {
                 month_reference: data.month,
                 ministry_id: ministry.id,
-                // Ignoramos o authorId do Firebase por enquanto para não dar erro de UUID
             }
         });
 
+        // Variável para acumularmos o texto formatado para o WhatsApp
+        let whatsappBackupText = `📋 *ESCALA CONSOLIDADA - ${data.ministry.toUpperCase()}* 📋\n\n`;
+
         // 4. Cria os Turnos (Shifts) e as Associações (ShiftAssignments)
         for (const shift of data.shifts) {
-            // Converte "01/02/2026" para Date
             const [day, month, year] = shift.date.split('/');
             const shiftDate = new Date(`${year}-${month}-${day}T12:00:00Z`);
 
@@ -41,21 +46,31 @@ export class RosterService {
                 }
             });
 
+            whatsappBackupText += `📅 *DATA: ${shift.date} (${shift.dayName})*\n`;
+
             // Vincula a equipe
             for (const memberName of shift.team) {
-                const memberId = memberMap.get(memberName);
-                if (memberId) {
+                const memberObj = memberMap.get(memberName);
+
+                if (memberObj) {
                     await prisma.shiftAssignment.create({
                         data: {
                             shift_id: createdShift.id,
-                            member_id: memberId
+                            member_id: memberObj.id
                         }
                     });
+
+                    whatsappBackupText += ` 🔹 ${memberName}\n`;
                 }
             }
+            whatsappBackupText += `\n`;
         }
 
-        return schedule;
+        // Retornamos a escala salva E o texto do WhatsApp gerado
+        return {
+            schedule,
+            whatsappBackupText: whatsappBackupText.trim()
+        };
     }
 
     async getAllRosters(ministryFilter: string) {
@@ -181,7 +196,10 @@ export class RosterService {
                 let attempts = 0;
 
                 while (!assignedTeamName && attempts < teamPool.length * 2) {
-                    const candidateTeam = teamPool[teamIdx % teamPool.length];
+
+                    // 👇 ADICIONE "as string" NO FINAL DESTA LINHA 👇
+                    const candidateTeam = teamPool[teamIdx % teamPool.length] as string;
+
                     const teamMembers = teamsMap[candidateTeam] || [];
 
                     const teamIsAvailable = weekServices.every((s: any) =>
@@ -193,7 +211,7 @@ export class RosterService {
                     attempts++;
                 }
 
-                const finalTeamMembers = assignedTeamName ? teamsMap[assignedTeamName] : ['SEM EQUIPE (Restrições)'];
+                const finalTeamMembers = assignedTeamName ? teamsMap[assignedTeamName as string] : ['SEM EQUIPE (Restrições)'];
 
                 weekServices.forEach((s: any) => {
                     generatedShifts.push({ date: s.date, dayName: s.dayName, team: finalTeamMembers });
@@ -293,5 +311,61 @@ export class RosterService {
         });
 
         return { success: true, message: "Equipe atualizada com sucesso!" };
+    }
+
+    async syncRosterToCalendar(rosterData: any) {
+        // 1. Busca Ministério e membros com e-mail
+        const ministry = await prisma.ministry.findUnique({
+            where: { name: rosterData.ministry }
+        });
+        if (!ministry) throw new Error(`Ministério '${rosterData.ministry}' não encontrado.`);
+
+        const membersList = await prisma.member.findMany({
+            where: { ministry_id: ministry.id },
+            select: { name: true, email: true }
+        });
+        const memberEmailMap = new Map(membersList.map(m => [m.name, m.email]));
+
+        // 2. Monta o array de convites (o JSON que o n8n espera)
+        const invites = [];
+        for (const shift of rosterData.shifts) {
+            for (const memberName of shift.team) {
+                const email = memberEmailMap.get(memberName);
+
+                // Só adiciona ao JSON se o membro tiver e-mail cadastrado
+                if (email && email.trim() !== '') {
+                    const emailTitle = `Escala de ${rosterData.month} - ${rosterData.ministry}`;
+                    let startTime = "";
+                    let endTime = "";
+
+                    if (shift.dayName === 'Domingo') {
+                        startTime = "17:00";
+                        endTime = "20:00";
+                    } else if (shift.dayName === 'Quinta-feira') {
+                        startTime = "18:30";
+                        endTime = "21:00";
+                    }
+
+                    invites.push({
+                        member_name: memberName,
+                        member_email: email,
+                        event_date: shift.date.split('/').reverse().join('-'),
+                        start_event_time: startTime, // 👈 Usa a variável dinâmica
+                        end_event_time: endTime,     // 👈 Usa a variável dinâmica
+                        day_name: shift.dayName,
+                        email_title: `${emailTitle} (${shift.dayName})`
+                    });
+                }
+            }
+        }
+
+        // 3. Dispara para o Webhook do n8n (Substitua pela sua URL real)
+        if (invites.length > 0) {
+            await axios.post(process.env.WEBHOOK_URL || '', {
+                ministry: rosterData.ministry,
+                roster_month: rosterData.month,
+                invites: invites
+            });
+        }
     }
 }

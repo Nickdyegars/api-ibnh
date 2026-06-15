@@ -6,7 +6,7 @@ export async function communityBusinessCategoryRoutes(app: FastifyInstance) {
   const controller = new CommunityBusinessCategoryController();
 
   // ROTA PÚBLICA (Usada para preencher o <select> no site)
-  app.get('/public/community-categories', (req, rep) => controller.getPublic(req, rep));
+  app.get('/public', (req, rep) => controller.getPublic(req, rep));
 
   // ROTAS PRIVADAS (Requer Login no Painel)
   app.register(async function privateRoutes(childApp) {
@@ -28,9 +28,9 @@ export async function communityBusinessCategoryRoutes(app: FastifyInstance) {
       }
     });
 
-    childApp.get('/cms/community-categories', (req, rep) => controller.getAllCms(req, rep));
-    childApp.post('/cms/community-categories', (req, rep) => controller.create(req, rep));
-    childApp.put('/cms/community-categories/:id', (req, rep) => controller.update(req, rep));
-    childApp.delete('/cms/community-categories/:id', (req, rep) => controller.delete(req, rep));
+    childApp.get('/', (req, rep) => controller.getAllCms(req, rep));
+    childApp.post('/', (req, rep) => controller.create(req, rep));
+    childApp.put('/:id', (req, rep) => controller.update(req, rep));
+    childApp.delete('/:id', (req, rep) => controller.delete(req, rep));
   });
 }

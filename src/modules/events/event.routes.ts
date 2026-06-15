@@ -5,7 +5,7 @@ export async function eventRoutes(app: FastifyInstance) {
   const eventController = new EventController();
 
   // === ROTA PÚBLICA (Sem Cadeado) ===
-  app.get('/public/events', (req, rep) => eventController.getPublic(req, rep));
+  app.get('/public', (req, rep) => eventController.getPublic(req, rep));
 
   // === ROTAS PRIVADAS (Com Cadeado JWT) ===
   app.register(async function privateRoutes(childApp) {
@@ -27,9 +27,9 @@ export async function eventRoutes(app: FastifyInstance) {
       }
     });
 
-    childApp.get('/cms/events', (req, rep) => eventController.getAll(req, rep));
-    childApp.post('/cms/events', (req, rep) => eventController.create(req, rep));
-    childApp.put('/cms/events/:id', (req, rep) => eventController.update(req, rep));
-    childApp.delete('/cms/events/:id', (req, rep) => eventController.delete(req, rep));
+    childApp.get('/', (req, rep) => eventController.getAll(req, rep));
+    childApp.post('/', (req, rep) => eventController.create(req, rep));
+    childApp.put('/:id', (req, rep) => eventController.update(req, rep));
+    childApp.delete('/:id', (req, rep) => eventController.delete(req, rep));
   });
 }

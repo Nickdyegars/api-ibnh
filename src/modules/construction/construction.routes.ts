@@ -5,7 +5,7 @@ export async function constructionRoutes(app: FastifyInstance) {
   const constructionController = new ConstructionController();
 
   // === ROTA PÚBLICA (Para o site carregar tudo de uma vez) ===
-  app.get('/public/construction', (req, rep) => constructionController.getPublicData(req, rep));
+  app.get('/public', (req, rep) => constructionController.getPublicData(req, rep));
 
   // === ROTAS PRIVADAS (Com Cadeado JWT para o Painel) ===
   app.register(async function privateRoutes(childApp) {
@@ -28,15 +28,15 @@ export async function constructionRoutes(app: FastifyInstance) {
     });
 
     // Info do PIX e Links
-    childApp.get('/cms/construction/info', (req, rep) => constructionController.getInfo(req, rep));
-    childApp.put('/cms/construction/info', (req, rep) => constructionController.updateInfo(req, rep));
+    childApp.get('/info', (req, rep) => constructionController.getInfo(req, rep));
+    childApp.put('/info', (req, rep) => constructionController.updateInfo(req, rep));
     
     // Gestão de Fotos
-    childApp.get('/cms/construction/photos', (req, rep) => constructionController.getPhotos(req, rep));
-    childApp.post('/cms/construction/photos', (req, rep) => constructionController.addPhoto(req, rep));
-    childApp.delete('/cms/construction/photos/:id', (req, rep) => constructionController.deletePhoto(req, rep));
+    childApp.get('/photos', (req, rep) => constructionController.getPhotos(req, rep));
+    childApp.post('/photos', (req, rep) => constructionController.addPhoto(req, rep));
+    childApp.delete('/photos/:id', (req, rep) => constructionController.deletePhoto(req, rep));
     
     // 👇 ROTA ADICIONADA PARA O FRONT-END (Drag and Drop / Ordenação) 👇
-    childApp.patch('/cms/construction/photos/:id/order', (req, rep) => constructionController.updateOrder(req, rep));
+    childApp.patch('/photos/:id/order', (req, rep) => constructionController.updateOrder(req, rep));
   });
 }

@@ -13,7 +13,7 @@ export async function teamRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/teams', (req, rep) => teamController.list(req, rep));
-  app.post('/teams', (req, rep) => teamController.create(req, rep));
-  app.delete('/teams/:id', (req, rep) => teamController.delete(req, rep));
+  app.get('/', (req, rep) => teamController.list(req, rep));
+  app.post('/', (req, rep) => teamController.create(req, rep));
+  app.delete('/:id', (req, rep) => teamController.delete(req, rep));
 }

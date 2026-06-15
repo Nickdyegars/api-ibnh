@@ -93,21 +93,28 @@ app.addHook('onReady', async () => {
 });
 
 // Registra as nossas rotas de autenticação (ficarão em /auth/login)
-app.register(authRoutes, { prefix: '/auth' });
-app.register(rosterRoutes);
-app.register(memberRoutes);
-app.register(analyticsRoutes, { prefix: '/analytics' });
-app.register(cmsRoutes);
-app.register(eventRoutes); // Registra as rotas de eventos
-app.register(constructionRoutes);
-app.register(financeRoutes);
-app.register(communityBusinessRoutes);
-app.register(communityBusinessCategoryRoutes);
-app.register(landingConfigRoutes);
-app.register(ecdRoutes); // Registra as rotas do ECD
-app.register(repertorioRoutes); // Registra as rotas do Repertório
-app.register(teamRoutes); // Registra as rotas de equipes
-app.register(ecdWorkersRoutes); // Registra as rotas do ECD Trabalhadores
+app.register(async function apiV1(v1) {
+
+  v1.register(authRoutes, { prefix: '/auth' });
+
+  // Rotas que estavam sem prefixo agora estão devidamente isoladas
+  v1.register(rosterRoutes, { prefix: '/rosters' });
+  v1.register(memberRoutes, { prefix: '/members' });
+  v1.register(cmsRoutes, { prefix: '/cms' });
+  v1.register(eventRoutes, { prefix: '/events' });
+  v1.register(constructionRoutes, { prefix: '/construction' });
+  v1.register(financeRoutes, { prefix: '/finance' });
+  v1.register(communityBusinessRoutes, { prefix: '/community-business' });
+  v1.register(communityBusinessCategoryRoutes, { prefix: '/community-business-category' });
+  v1.register(landingConfigRoutes, { prefix: '/landing-config' });
+  v1.register(ecdRoutes, { prefix: '/ecd' });
+  v1.register(repertorioRoutes, { prefix: '/repertorio' });
+  v1.register(teamRoutes, { prefix: '/teams' });
+  v1.register(ecdWorkersRoutes, { prefix: '/ecd-workers' });
+
+  v1.register(analyticsRoutes, { prefix: '/analytics' });
+
+}, { prefix: '/v1' }); // 👈 O prefixo global entra aqui!
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

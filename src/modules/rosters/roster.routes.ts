@@ -8,14 +8,16 @@ export async function rosterRoutes(app: FastifyInstance) {
     try { await request.jwtVerify(); } catch (err) { return reply.status(401).send({ error: 'Não autorizado.' }); }
   });
 
-  app.get('/rosters', (req, rep) => rosterController.list(req, rep));
+  app.get('/', (req, rep) => rosterController.list(req, rep));
   
   // NOVA ROTA POST AQUI:
-  app.post('/rosters', (req, rep) => rosterController.create(req, rep));
+  app.post('/', (req, rep) => rosterController.create(req, rep));
   
-  app.delete('/rosters/:id', (req, rep) => rosterController.delete(req, rep));
+  app.delete('/:id', (req, rep) => rosterController.delete(req, rep));
 
-  app.post('/rosters/generate', (req, rep) => rosterController.generatePreview(req, rep));
+  app.post('/generate', (req, rep) => rosterController.generatePreview(req, rep));
 
-  app.put('/rosters/shift/:shiftId', (req, rep) => rosterController.updateShift(req, rep));
+  app.put('/shift/:shiftId', (req, rep) => rosterController.updateShift(req, rep));
+
+  app.post('/sync-calendar', (req, rep) => rosterController.syncCalendar(req, rep));
 }

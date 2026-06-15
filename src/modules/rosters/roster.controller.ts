@@ -12,32 +12,20 @@ export class RosterController {
 
     async create(request: FastifyRequest, reply: FastifyReply) {
         try {
-            const user = request.user as any; // Pegamos quem está logado pelo Token JWT!
+            const user = request.user as any;
             const data = createRosterBodySchema.parse(request.body);
 
-            // === TRAVA DE SEGURANÇA (RBAC) ===
-            if (user.level > 0) {
-                const userMinistryName = user.ministry_access || user.ministry || '';
+            // ... (Mantenha a trava de segurança RBAC intacta) ...
 
-                const userMin = userMinistryName.trim().toLowerCase();
-                const dataMin = (data.ministry || '').trim().toLowerCase();
+            // O retorno agora é o objeto com a escala e o texto do zap
+            const result = await rosterService.createRoster(data);
 
-                const isMultimediaSub = userMin === 'multimídia' && dataMin.includes('multimídia');
+            // 📝 LOG (Usamos result.schedule.id)
+            AuditService.log(user.sub, 'CREATE', 'ROSTER', result.schedule?.id, data);
 
-                if (userMin !== dataMin && !isMultimediaSub) {
-                    return reply.status(403).send({
-                        error: `Acesso negado: Seu perfil (${userMinistryName || 'Nenhum'}) não pode gerenciar escalas de ${data.ministry}.`
-                    });
-                }
-            }
-            // =================================
+            // Devolvemos status 201 com tudo dentro
+            return reply.status(201).send(result);
 
-            const newRoster = await rosterService.createRoster(data) as any;
-
-            // 📝 LOG: Geração e publicação de uma nova escala ministerial
-            AuditService.log(user.sub, 'CREATE', 'ROSTER', newRoster?.id, data);
-
-            return reply.status(201).send(newRoster);
         } catch (error: any) {
             console.error("Erro ao criar escala:", error);
             return reply.status(400).send({ error: error.message || 'Erro ao criar escala' });
@@ -46,7 +34,7 @@ export class RosterController {
 
     async generatePreview(request: FastifyRequest, reply: FastifyReply) {
         try {
-            const user = request.user as any; 
+            const user = request.user as any;
             const data = request.body as any;
 
             // === TRAVA DE SEGURANÇA (RBAC) ===
@@ -161,6 +149,43 @@ export class RosterController {
         } catch (error: any) {
             console.error("Erro ao editar turno:", error);
             return reply.status(400).send({ error: error.message || 'Erro ao editar escala' });
+        }
+    }
+
+    // src/modules/rosters/roster.controller.ts
+
+    async syncCalendar(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const user = request.user as any;
+            const { rosterData } = request.body as any; // Pega o selectedRoster enviado pelo Front
+
+            if (!rosterData) {
+                return reply.status(400).send({ error: 'Dados da escala não informados.' });
+            }
+
+            // === TRAVA DE SEGURANÇA (RBAC) IGUAL AOS OUTROS MÉTODOS ===
+            if (user.level > 0) {
+                const userMinistryName = user.ministry_access || user.ministry || '';
+                const userMin = userMinistryName.trim().toLowerCase();
+                const dataMin = (rosterData.ministry || '').trim().toLowerCase();
+
+                const isMultimediaSub = userMin === 'multimídia' && dataMin.includes('multimídia');
+
+                if (userMin !== dataMin && !isMultimediaSub) {
+                    return reply.status(403).send({
+                        error: `Acesso negado: Seu perfil não pode sincronizar agendas do ministério ${rosterData.ministry}.`
+                    });
+                }
+            }
+            // =========================================================
+
+            // Chama o service para fazer o trabalho pesado
+            await rosterService.syncRosterToCalendar(rosterData);
+
+            return reply.send({ success: true, message: 'Escala sincronizada com sucesso!' });
+        } catch (error: any) {
+            console.error("Erro ao sincronizar calendário no controller:", error);
+            return reply.status(400).send({ error: error.message || 'Erro ao sincronizar agenda.' });
         }
     }
 }

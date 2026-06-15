@@ -4,9 +4,12 @@ import { EcdController } from './ecd.controller.js';
 export async function ecdRoutes(app: FastifyInstance) {
   const ecdController = new EcdController();
 
-  app.post('/public/ecd/register', (req, rep) => ecdController.register(req, rep));
-  app.get('/public/ecd/validate-token/:token', (req, rep) => ecdController.validateToken(req as any, rep));
+  // === ROTAS PÚBLICAS (Acesso externo pelo site/landing page) ===
+  // URL Final: /v1/ecd/public/register
+  app.post('/public/register', (req, rep) => ecdController.register(req, rep));
+  app.get('/public/validate-token/:token', (req, rep) => ecdController.validateToken(req as any, rep));
 
+  // === ROTAS PRIVADAS (Requer Login no Painel) ===
   app.register(async function privateRoutes(childApp) {
     
     // 👇 TRAVA DE SEGURANÇA MÁXIMA: NÍVEL 0 👇
@@ -27,21 +30,24 @@ export async function ecdRoutes(app: FastifyInstance) {
     });
 
     // Edições
-    childApp.get('/cms/ecd/editions', (req, rep) => ecdController.getEditions(req, rep));
-    childApp.post('/cms/ecd/editions', (req, rep) => ecdController.createEdition(req, rep));
-    childApp.put('/cms/ecd/editions/:id', (req, rep) => ecdController.updateEdition(req, rep));
-    childApp.delete('/cms/ecd/editions/:id', (req, rep) => ecdController.deleteEdition(req, rep));
+    // URL Final: /v1/ecd/editions
+    childApp.get('/editions', (req, rep) => ecdController.getEditions(req, rep));
+    childApp.post('/editions', (req, rep) => ecdController.createEdition(req, rep));
+    childApp.put('/editions/:id', (req, rep) => ecdController.updateEdition(req, rep));
+    childApp.delete('/editions/:id', (req, rep) => ecdController.deleteEdition(req, rep));
 
     // Líderes
-    childApp.get('/cms/ecd/leaders', (req, rep) => ecdController.getLeaders(req, rep));
-    childApp.post('/cms/ecd/leaders', (req, rep) => ecdController.createLeader(req, rep));
-    childApp.patch('/cms/ecd/leaders/:id', (req, rep) => ecdController.updateLeader(req, rep));
-    childApp.delete('/cms/ecd/leaders/:id', (req, rep) => ecdController.deleteLeader(req, rep));
+    // URL Final: /v1/ecd/leaders
+    childApp.get('/leaders', (req, rep) => ecdController.getLeaders(req, rep));
+    childApp.post('/leaders', (req, rep) => ecdController.createLeader(req, rep));
+    childApp.patch('/leaders/:id', (req, rep) => ecdController.updateLeader(req, rep));
+    childApp.delete('/leaders/:id', (req, rep) => ecdController.deleteLeader(req, rep));
     
     // Inscritos / Fichas
-    childApp.get('/cms/ecd/registrations', (req, rep) => ecdController.getRegistrations(req, rep));
-    childApp.patch('/cms/ecd/registrations/:id/payment', (req, rep) => ecdController.updatePayment(req, rep));
-    childApp.delete('/cms/ecd/registrations/:id', (req, rep) => ecdController.deleteRegistration(req, rep));
-    childApp.put('/cms/ecd/registrations/:id/complete', (req, rep) => ecdController.completeRegistration(req, rep));
+    // URL Final: /v1/ecd/registrations
+    childApp.get('/registrations', (req, rep) => ecdController.getRegistrations(req, rep));
+    childApp.patch('/registrations/:id/payment', (req, rep) => ecdController.updatePayment(req, rep));
+    childApp.delete('/registrations/:id', (req, rep) => ecdController.deleteRegistration(req, rep));
+    childApp.put('/registrations/:id/complete', (req, rep) => ecdController.completeRegistration(req, rep));
   });
 }

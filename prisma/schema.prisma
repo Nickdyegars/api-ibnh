@@ -67,10 +67,10 @@ model UserProfile {
 model Member {
   id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   name        String   @db.VarChar(255)
+  email       String?  @db.VarChar(255) // 👇 Campo adicionado para o Google Agenda
   phone       String?  @db.VarChar(20)
   role        String?  @db.VarChar(100) 
   
-  // Substitua o 'team String?' por isso:
   team_id     String?  @db.Uuid
   team        Team?    @relation(fields: [team_id], references: [id], onDelete: SetNull)
   

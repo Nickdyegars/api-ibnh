@@ -4,11 +4,12 @@ import { CommunityBusinessController } from './community-business.controller.js'
 export async function communityBusinessRoutes(app: FastifyInstance) {
   const controller = new CommunityBusinessController();
 
-  // === ROTA PÚBLICA (Livre para o Site) ===
-  app.get('/public/community-businesses', (req, rep) => controller.getPublic(req, rep));
-  app.post('/public/community-businesses/:id/click', (request, reply) => controller.registerClick(request, reply));
-  app.post('/public/community-businesses/upload', (req, rep) => controller.uploadLogo(req, rep));
-  app.post('/public/community-businesses/register', (req, rep) => controller.registerPublic(req, rep));
+  // === ROTAS PÚBLICAS (Livre para o Site) ===
+  // A URL final no navegador/front será: /v1/community-business/public
+  app.get('/public', (req, rep) => controller.getPublic(req, rep));
+  app.post('/public/:id/click', (request, reply) => controller.registerClick(request, reply));
+  app.post('/public/upload', (req, rep) => controller.uploadLogo(req, rep));
+  app.post('/public/register', (req, rep) => controller.registerPublic(req, rep));
 
   // === ROTAS PRIVADAS (Requer Login no Painel) ===
   app.register(async function privateRoutes(childApp) {
@@ -31,10 +32,11 @@ export async function communityBusinessRoutes(app: FastifyInstance) {
     });
 
     // CRUD do Painel (Agora 100% blindado)
-    childApp.get('/cms/community-businesses', (req, rep) => controller.getAllCms(req, rep));
-    childApp.post('/cms/community-businesses', (req, rep) => controller.create(req, rep));
-    childApp.put('/cms/community-businesses/:id', (req, rep) => controller.update(req, rep));
-    childApp.delete('/cms/community-businesses/:id', (req, rep) => controller.delete(req, rep));
-    childApp.post('/cms/community-businesses/upload', (req, rep) => controller.uploadLogo(req, rep));
+    // A URL final no navegador/front será: /v1/community-business
+    childApp.get('/', (req, rep) => controller.getAllCms(req, rep));
+    childApp.post('/', (req, rep) => controller.create(req, rep));
+    childApp.put('/:id', (req, rep) => controller.update(req, rep));
+    childApp.delete('/:id', (req, rep) => controller.delete(req, rep));
+    childApp.post('/upload', (req, rep) => controller.uploadLogo(req, rep));
   });
 }

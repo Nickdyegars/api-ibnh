@@ -17,8 +17,8 @@ export async function memberRoutes(app: FastifyInstance) {
   });
   // ===============================================================
 
-  app.get('/members', (req, rep) => memberController.list(req, rep));
-  app.post('/members', (req, rep) => memberController.create(req, rep));
-  app.put('/members/:id', (req, rep) => memberController.update(req, rep));
-  app.delete('/members/:id', (req, rep) => memberController.delete(req, rep));
+  app.get('/', (req, rep) => memberController.list(req, rep));
+  app.post('/', (req, rep) => memberController.create(req, rep));
+  app.put('/:id', (req, rep) => memberController.update(req, rep));
+  app.delete('/:id', (req, rep) => memberController.delete(req, rep));
 }

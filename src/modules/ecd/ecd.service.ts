@@ -24,7 +24,12 @@ export class EcdService {
           emergency_contact: data.emergencyContact, emergency_phone: data.emergencyPhone, in_cell: data.inCell,
           cell_leader_name: data.cellLeaderName ?? null, invited_by: data.invitedBy ?? null, profile_photo_url: profileUrl,
           receipt_photo_url: receiptUrl, ficha_type: tokenRecord.token_type, leader_id: tokenRecord.leader_id,
-          token_id: tokenRecord.id, status: 'ATIVO'
+          token_id: tokenRecord.id, status: 'ATIVO',
+
+          // 👇 SALVANDO A AUDITORIA LGPD AQUI 👇
+          lgpd_consent: data.lgpdConsent,
+          lgpd_consent_date: data.lgpdConsentDate ? new Date(data.lgpdConsentDate) : new Date(),
+          lgpd_terms_version: data.lgpdTermsVersion || '1.0'
         }
       });
 

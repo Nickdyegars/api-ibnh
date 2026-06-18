@@ -14,6 +14,11 @@ export const communityBusinessSchema = z.object({
   products_services: z.string().min(5, "Produtos/Serviços obrigatórios"),
   logo_url: z.string().optional().nullable(),
   is_active: z.boolean().optional(),
+
+  created_by_role: z.string().optional(),
+  lgpdConsent: z.union([z.boolean(), z.string()]).transform(val => val === true || val === 'true').optional(),
+  lgpdConsentDate: z.string().optional(),
+  lgpdTermsVersion: z.string().optional(),
 });
 
 // Schema para atualização (tudo opcional)

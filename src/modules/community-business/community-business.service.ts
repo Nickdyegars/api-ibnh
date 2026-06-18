@@ -2,6 +2,7 @@
 import { prisma } from '../../shared/database/prisma.js';
 import { CommunityBusinessCreateType, CommunityBusinessUpdateType } from './community-business.schemas.js';
 import { deleteImage } from '../../shared/storage/minio.js';
+import axios from 'axios';
 
 export class CommunityBusinessService {
 
@@ -31,13 +32,10 @@ export class CommunityBusinessService {
 
     // === CRIAÇÃO ===
     async create(data: CommunityBusinessCreateType) {
-        return await prisma.communityBusiness.create({
+        const business = await prisma.communityBusiness.create({
             data: {
                 full_name: data.full_name,
                 business_name: data.business_name,
-
-                // ❌ A LINHA category_id FOI COMPLETAMENTE APAGADA DAQUI
-
                 professional_type: data.professional_type,
                 phone: data.phone,
                 business_model: data.business_model,
@@ -48,12 +46,38 @@ export class CommunityBusinessService {
                 logo_url: data.logo_url ?? null,
                 is_active: data.is_active ?? false,
 
-                // ✅ O bloco 'categories' tem que ficar AQUI DENTRO do 'data', e não fora!
+                // 👇 MAPEAMENTO DA AUDITORIA E ORIGEM
+                created_by_role: data.created_by_role ?? 'ADMIN',
+                lgpd_consent: data.lgpdConsent ?? null,
+                lgpd_consent_date: data.lgpdConsentDate ? new Date(data.lgpdConsentDate) : null,
+                lgpd_terms_version: data.lgpdTermsVersion ?? null,
+
                 categories: {
                     connect: data.categoryIds.map((id: string) => ({ id }))
                 }
-            } // 👈 O bloco 'data' só fecha aqui!
+            }
         });
+
+        // 👇 DISPARO PARA O N8N (Apenas se vier do site público)
+        if (business.created_by_role === 'PUBLIC') {
+            const webhookUrl = process.env.N8N_WEBHOOK_URL_EMPREENDEDOR;
+            try {
+                // Lembre-se de colar a URL do seu Webhook de Produção aqui
+                await axios.post(webhookUrl!, {
+                    event_type: "NOVO_EMPREENDEDOR",
+                    owner_name: business.full_name,
+                    business_name: business.business_name,
+                    phone: business.phone,
+                    description: business.description,
+                    panel_url: "https://painel.ibnhitamaraju.com.br/gerenciar-site"
+                });
+            } catch (error) {
+                console.error("❌ Erro ao notificar o n8n sobre novo empreendedor:", error);
+                // Não travamos a função. Se o n8n falhar, o cliente ainda vê a mensagem de sucesso
+            }
+        }
+
+        return business;
     }
 
     async update(id: string, data: CommunityBusinessUpdateType) {
@@ -107,7 +131,7 @@ export class CommunityBusinessService {
     // === REGISTRO DE CLIQUES ===
     async registerClick(id: string, platform: 'whatsapp' | 'instagram') {
         // Verifica qual plataforma recebeu o clique e prepara o incremento
-        const dataToUpdate = platform === 'whatsapp' 
+        const dataToUpdate = platform === 'whatsapp'
             ? { whatsapp_clicks: { increment: 1 } }
             : { instagram_clicks: { increment: 1 } };
 

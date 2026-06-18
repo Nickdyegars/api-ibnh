@@ -83,14 +83,12 @@ export class EcdWorkersService {
     // --- FICHAS DE INSCRIÇÃO ---
     async createRegistration(data: RegisterWorkerType) {
         // 1. Tenta encontrar o token na tabela de líderes (Link do Líder)
-        // Mudamos para findFirst para evitar qualquer erro de conversão estrita do Prisma
         const tokenRecord = await prisma.ecdWorkerToken.findFirst({
             where: { token_code: data.token },
             include: { leader: true }
         });
 
-        // 2. 👇 A MÁGICA DA UNIFICAÇÃO 👇
-        // Se não encontrou o token nos líderes, verifica se é o Token Público de uma Edição (Link Geral)
+        // 2. A MÁGICA DA UNIFICAÇÃO
         if (!tokenRecord) {
             const isEditionToken = await prisma.ecdEdition.findFirst({
                 where: { public_token: data.token }
@@ -98,6 +96,7 @@ export class EcdWorkersService {
 
             if (isEditionToken) {
                 // Bingo! É o link geral. Encaminha os dados para o método genérico e finaliza
+                // Os dados da LGPD já estão dentro de 'data', então o método genérico também vai recebê-los
                 return await this.createRegistrationGeneric(data);
             }
 
@@ -133,6 +132,11 @@ export class EcdWorkersService {
                     profile_photo_url: data.profilePhotoUrl ?? null,
                     receipt_photo_url: data.receiptPhotoUrl ?? null,
                     audio_record_url: data.audioRecordUrl ?? null,
+
+                    // 👇 SALVANDO A AUDITORIA LGPD AQUI 👇
+                    lgpd_consent: data.lgpdConsent,
+                    lgpd_consent_date: data.lgpdConsentDate ? new Date(data.lgpdConsentDate) : new Date(),
+                    lgpd_terms_version: data.lgpdTermsVersion || '1.0',
 
                     status: 'PENDENTE',
                     payment_status: 'PENDENTE',

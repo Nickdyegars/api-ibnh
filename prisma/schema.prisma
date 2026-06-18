@@ -373,6 +373,13 @@ model CommunityBusiness {
   logo_url          String?  @db.Text         // URL da foto ou logo
   whatsapp_clicks   Int @default(0)
   instagram_clicks  Int @default(0)
+
+  lgpd_consent         Boolean? 
+  lgpd_consent_date    DateTime?
+  lgpd_terms_version   String?
+
+  // 👇 ORIGEM: Ajuda a saber de onde o dado veio (ex: "PUBLIC" ou "ADMIN")
+  created_by_role      String   @default("PUBLIC")
   
   // Controles do Painel Admin
   is_active         Boolean  @default(false)  // Começa como 'false' para o painel aprovar antes de ir pro ar
@@ -518,6 +525,9 @@ model EcdRegistration {
   status            String   @default("ATIVO") 
   edition_id        String?  @db.Uuid
   edition           EcdEdition? @relation(fields: [edition_id], references: [id])
+  lgpd_consent         Boolean  @default(false)
+  lgpd_consent_date    DateTime @default(now())
+  lgpd_terms_version   String   @default("1.0")
 
   @@map("ecd_registrations")
   @@schema("app")
@@ -628,6 +638,10 @@ model EcdWorkerRegistration {
   created_at              DateTime @default(now()) @db.Timestamptz(3)
 
   audio_record_url        String?  @db.Text
+
+  lgpd_consent         Boolean  @default(false)
+  lgpd_consent_date    DateTime @default(now())
+  lgpd_terms_version   String   @default("1.0")
   
   // --- RELACIONAMENTOS ---
   area_id                 String   @db.Uuid

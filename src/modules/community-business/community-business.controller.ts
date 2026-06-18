@@ -90,8 +90,8 @@ export class CommunityBusinessController {
             }
 
             if (data.file.truncated) {
-                return reply.status(400).send({ 
-                    error: 'A imagem é muito grande. O tamanho máximo permitido é de 5MB.' 
+                return reply.status(400).send({
+                    error: 'A imagem é muito grande. O tamanho máximo permitido é de 5MB.'
                 });
             }
 
@@ -139,7 +139,10 @@ export class CommunityBusinessController {
     async registerPublic(request: FastifyRequest, reply: FastifyReply) {
         try {
             const data = communityBusinessSchema.parse(request.body);
+
+            // 👇 FORÇAMOS AS CONFIGURAÇÕES DE SEGURANÇA E ORIGEM
             data.is_active = false;
+            data.created_by_role = 'PUBLIC';
 
             const newBusiness = await businessService.create(data);
             return reply.status(201).send(newBusiness);

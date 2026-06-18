@@ -14,14 +14,14 @@ export const workerLeaderSchema = z.object({
 
 export const registerWorkerSchema = z.object({
   token: z.string().uuid("Token de inscrição inválido."),
-  
+
   // Dados Básicos
   fullName: z.string().min(3, "Nome completo é obrigatório"),
   gender: z.enum(['M', 'F']),
   phone: z.string().min(10, "Telefone inválido"),
   age: z.union([z.number(), z.string().transform(Number)]),
   maritalStatus: z.string().min(2, "Estado civil obrigatório"),
-  
+
   // Ficha Específica
   hasServedBefore: simNaoToBool,
   previousTeam: z.string().optional().nullable(),
@@ -41,6 +41,10 @@ export const registerWorkerSchema = z.object({
   profilePhotoUrl: z.string().optional().nullable(),
   receiptPhotoUrl: z.string().optional().nullable(),
   audioRecordUrl: z.string().optional().nullable(),
+
+  lgpdConsent: z.union([z.boolean(), z.string()]).transform(val => val === true || val === 'true'),
+  lgpdConsentDate: z.string().optional(),
+  lgpdTermsVersion: z.string().optional(),
 });
 
 export type WorkerAreaType = z.infer<typeof workerAreaSchema>;

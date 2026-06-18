@@ -26,6 +26,9 @@ export const registerEcdSchema = z.object({
   inCell: simNaoToBool,
   cellLeaderName: z.string().optional().nullable(),
   invitedBy: z.string().optional().nullable(),
+  lgpdConsent: z.union([z.boolean(), z.string()]).transform(val => val === true || val === 'true'),
+  lgpdConsentDate: z.string().optional(),
+  lgpdTermsVersion: z.string().optional(),
 });
 
 export const editionEcdSchema = z.object({

@@ -478,56 +478,59 @@ model EcdEdition {
 }
 
 model EcdRegistration {
-  id                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   
-  profile_photo_url String?  @db.Text
-  receipt_photo_url String?  @db.Text
+  profile_photo_url   String?  @db.Text
+  receipt_photo_url   String?  @db.Text
   
-  full_name         String   @db.VarChar(255)
-  nickname          String?  @db.VarChar(100)
-  phone             String   @db.VarChar(20)
-  gender            String   @db.VarChar(1) 
-  age               Int
-  address           String?  @db.Text
+  full_name           String   @db.VarChar(255)
+  nickname            String?  @db.VarChar(100)
+  phone               String   @db.VarChar(20)
+  gender              String   @db.VarChar(1) 
+  age                 Int
+  address             String?  @db.Text
   
-  is_married        Boolean  @default(false)
-  spouse_name       String?  @db.VarChar(255)
-  relative_going    Boolean  @default(false)
-  relative_degree   String?  @db.VarChar(100)
+  is_married          Boolean  @default(false)
+  spouse_name         String?  @db.VarChar(255)
+  relative_going      Boolean  @default(false)
+  relative_degree     String?  @db.VarChar(100)
   
-  has_illness       Boolean  @default(false)
-  illness_desc      String?  @db.Text
-  takes_medication  Boolean  @default(false)
-  medication_desc   String?  @db.Text
-  dietary_restriction Boolean @default(false)
-  dietary_desc      String?  @db.Text
-  shirt_size        String?  @db.VarChar(10)
+  has_illness         Boolean  @default(false)
+  illness_desc        String?  @db.Text
+  takes_medication    Boolean  @default(false)
+  medication_desc     String?  @db.Text
+  dietary_restriction Boolean  @default(false)
+  dietary_desc        String?  @db.Text
+  shirt_size          String?  @db.VarChar(10)
   
-  emergency_contact String?  @db.VarChar(255)
-  emergency_phone   String?  @db.VarChar(20)
+  emergency_contact   String?  @db.VarChar(255)
+  emergency_phone     String?  @db.VarChar(20)
 
-  in_cell           Boolean  @default(false)
-  cell_leader_name  String?  @db.VarChar(255)
-  invited_by        String?  @db.VarChar(255)
-  
-  payment_status    String   @default("PENDENTE") @db.VarChar(50)
-  ficha_type        String   @db.VarChar(50) 
-  
-  leader_id         String   @db.Uuid
-  leader            EcdLeader @relation(fields: [leader_id], references: [id])
-  
-  token_id          String   @unique @db.Uuid
-  token             EcdToken @relation(fields: [token_id], references: [id])
+  in_cell             Boolean  @default(false)
+  cell_leader_name    String?  @db.VarChar(255)
+  invited_by          String?  @db.VarChar(255)
 
-  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  // 👇 NOVOS CAMPOS: Perfil Espiritual e 1º Encontro
+  spiritual_status    String?  @db.VarChar(100)
   
-  // Controle de Histórico
-  status            String   @default("ATIVO") 
-  edition_id        String?  @db.Uuid
-  edition           EcdEdition? @relation(fields: [edition_id], references: [id])
-  lgpd_consent         Boolean  @default(false)
-  lgpd_consent_date    DateTime @default(now())
-  lgpd_terms_version   String   @default("1.0")
+  payment_status      String   @default("PENDENTE") @db.VarChar(50)
+  
+  // 👇 AGORA SÃO OPCIONAIS (com '?') PARA O PRÉ-CADASTRO GERAL
+  ficha_type          String?  @db.VarChar(50) 
+  leader_id           String?  @db.Uuid
+  leader              EcdLeader? @relation(fields: [leader_id], references: [id])
+  token_id            String?  @unique @db.Uuid
+  token               EcdToken? @relation(fields: [token_id], references: [id])
+
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  
+  // Controle de Histórico e LGPD
+  status              String   @default("ATIVO") 
+  edition_id          String?  @db.Uuid
+  edition             EcdEdition? @relation(fields: [edition_id], references: [id])
+  lgpd_consent        Boolean  @default(false)
+  lgpd_consent_date   DateTime @default(now())
+  lgpd_terms_version  String   @default("1.0")
 
   @@map("ecd_registrations")
   @@schema("app")

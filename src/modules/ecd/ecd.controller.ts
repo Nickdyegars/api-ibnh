@@ -34,7 +34,12 @@ export class EcdController {
       return reply.status(201).send({ success: true, message: "Inscrição realizada com sucesso!", registrationId: registration.id });
 
     } catch (error: unknown) {
-      if (error instanceof z.ZodError) return reply.status(400).send({ success: false, message: "Dados inválidos", errors: error.format() });
+      // 👇 ESSA É A LINHA MÁGICA QUE VAI DEDURAR O ERRO 👇
+      console.error("🚨 ERRO FATAL NO CADASTRO:", error);
+
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ success: false, message: "Dados inválidos", errors: error.format() });
+      }
       if (error instanceof Error) {
         if (error.message === "TOKEN_NOT_FOUND") return reply.status(404).send({ success: false, message: "Link inválido." });
         if (error.message === "TOKEN_ALREADY_USED") return reply.status(400).send({ success: false, message: "Este link já foi utilizado." });
@@ -64,7 +69,7 @@ export class EcdController {
       const requester = request.user as any;
       const { name, yellowSlots, greenSlots } = request.body as any;
       if (!name) return reply.status(400).send({ error: 'Nome do líder é obrigatório' });
-      
+
       const result = await ecdService.createLeaderWithTokens(name, Number(yellowSlots), Number(greenSlots)) as any;
 
       // 📝 LOG: Geração de líder e seus links de inscrição
@@ -227,6 +232,26 @@ export class EcdController {
     } catch (error: any) {
       if (error.code === 'P2003') return reply.status(400).send({ error: 'Existem fichas de histórico atreladas a esta edição.' });
       return reply.status(500).send({ error: 'Erro ao excluir edição.' });
+    }
+  }
+
+  async approveRegistration(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      // Pega o ID da rota e os dados do body enviados pelo modal
+      const { id } = request.params as { id: string };
+      const { leader_id, ficha_type } = request.body as { leader_id: string, ficha_type: 'AMARELA' | 'VERDE' };
+
+      if (!leader_id || !ficha_type) {
+        return reply.status(400).send({ error: 'Líder e tipo de ficha são obrigatórios.' });
+      }
+
+      // Repassa a responsabilidade para o Service
+      const updated = await ecdService.approveRegistration(id, leader_id, ficha_type);
+
+      return reply.send({ success: true, registration: updated });
+    } catch (error: any) {
+      console.error("Erro na aprovação:", error);
+      return reply.status(400).send({ error: error.message || 'Erro ao aprovar ficha' });
     }
   }
 }

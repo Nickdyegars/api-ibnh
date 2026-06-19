@@ -29,6 +29,7 @@ export const registerEcdSchema = z.object({
   lgpdConsent: z.union([z.boolean(), z.string()]).transform(val => val === true || val === 'true'),
   lgpdConsentDate: z.string().optional(),
   lgpdTermsVersion: z.string().optional(),
+  spiritualStatus: z.string().optional(),
 });
 
 export const editionEcdSchema = z.object({

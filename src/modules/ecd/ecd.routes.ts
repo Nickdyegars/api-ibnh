@@ -49,5 +49,6 @@ export async function ecdRoutes(app: FastifyInstance) {
     childApp.patch('/registrations/:id/payment', (req, rep) => ecdController.updatePayment(req, rep));
     childApp.delete('/registrations/:id', (req, rep) => ecdController.deleteRegistration(req, rep));
     childApp.put('/registrations/:id/complete', (req, rep) => ecdController.completeRegistration(req, rep));
+    childApp.put('/registrations/:id/approve', (req, rep) => ecdController.approveRegistration(req, rep));
   });
 }

@@ -159,5 +159,24 @@ export class EcdService {
     });
   }
 
-  
+  async uploadReceiptAdmin(id: string, file: any) {
+    // 1. Verifica se a ficha existe
+    const reg = await prisma.ecdRegistration.findUnique({ where: { id } });
+    if (!reg) throw new Error("Ficha não encontrada.");
+
+    // 2. Faz o upload para o MinIO usando a sua função nativa
+    const receiptUrl = await uploadImage(
+      file.filename,
+      file.buffer,
+      file.mimetype,
+      'ecd/receipts'
+    );
+
+    // 3. Atualiza a URL do banco de dados
+    return await prisma.ecdRegistration.update({
+      where: { id },
+      data: { receipt_photo_url: receiptUrl }
+    });
+  }
+
 }

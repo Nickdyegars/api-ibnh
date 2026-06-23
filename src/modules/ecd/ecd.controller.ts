@@ -254,4 +254,36 @@ export class EcdController {
       return reply.status(400).send({ error: error.message || 'Erro ao aprovar ficha' });
     }
   }
+
+  async uploadReceiptAdmin(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const requester = request.user as any;
+      const { id } = request.params as { id: string };
+      
+      // Recebe o arquivo do painel
+      const data = await request.file();
+
+      if (!data) {
+        return reply.status(400).send({ error: 'Nenhum arquivo enviado.' });
+      }
+
+      // Prepara o objeto igual ao que o seu Service já espera
+      const fileObj = {
+        filename: data.filename,
+        buffer: await data.toBuffer(),
+        mimetype: data.mimetype
+      };
+
+      // Chama a regra de negócio no Service
+      const result = await ecdService.uploadReceiptAdmin(id, fileObj);
+
+      // 📝 LOG: Admin anexou um comprovante
+      AuditService.log(requester.sub, 'UPLOAD_RECEIPT', 'ECD_REGISTRATION', id);
+
+      return reply.send({ success: true, receipt_photo_url: result.receipt_photo_url });
+    } catch (error: any) {
+      console.error("Erro no upload de comprovante pelo admin:", error);
+      return reply.status(500).send({ error: error.message || 'Erro interno ao salvar comprovante' });
+    }
+  }
 }

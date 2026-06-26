@@ -104,20 +104,24 @@ export class EcdService {
       where: { editionId: latestEdition.id },
       include: {
         cell: { select: { name: true, leader: true } },
-        tokens: true
+        tokens: true,
+        // 👇 INCLUÍMOS AS INSCRIÇÕES AQUI PARA SABER QUEM USOU O LINK
+        registrations: { select: { token_id: true, full_name: true, status: true } }
       },
       orderBy: { cell: { name: 'asc' } }
     });
 
     return leaders.map(l => ({
       id: l.id,
-      name: l.cell ? `${l.cell.leader} (${l.cell.name})` : l.name,
-      isExternal: !l.cell, // Flag para o Frontend saber que pode apagar/editar o nome
+      name: l.cell ? `${l.cell.leader} (${l.cell.name})` : (l.name ?? 'Sem Nome'),
+      isExternal: !l.cell,
       total_yellow_slots: l.totalYellowSlots,
       used_yellow_slots: l.usedYellowSlots,
       total_green_slots: l.totalGreenSlots,
       used_green_slots: l.usedGreenSlots,
-      tokens: l.tokens
+      tokens: l.tokens,
+      // 👇 REPASSAMOS AS INSCRIÇÕES PARA O FRONTEND
+      registrations: l.registrations
     }));
   }
 

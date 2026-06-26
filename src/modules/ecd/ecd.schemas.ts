@@ -36,7 +36,9 @@ export const editionEcdSchema = z.object({
   name: z.string().min(3, "O nome da edição é obrigatório"),
   yellowSlots: z.number().int().min(0, "A cota não pode ser negativa").or(z.string().transform(Number)),
   greenSlots: z.number().int().min(0, "A cota não pode ser negativa").or(z.string().transform(Number)),
-  workerSlots: z.number().int().min(0, "A cota não pode ser negativa").or(z.string().transform(Number))
+  workerSlots: z.number().int().min(0, "A cota não pode ser negativa").or(z.string().transform(Number)),
+  encontristaPaymentLink: z.string().optional().nullable(),
+  workerPaymentLink: z.string().optional().nullable()
 });
 
 export type RegisterEcdType = z.infer<typeof registerEcdSchema>;

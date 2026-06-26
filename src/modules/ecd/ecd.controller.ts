@@ -259,7 +259,7 @@ export class EcdController {
     try {
       const requester = request.user as any;
       const { id } = request.params as { id: string };
-      
+
       // Recebe o arquivo do painel
       const data = await request.file();
 
@@ -284,6 +284,28 @@ export class EcdController {
     } catch (error: any) {
       console.error("Erro no upload de comprovante pelo admin:", error);
       return reply.status(500).send({ error: error.message || 'Erro interno ao salvar comprovante' });
+    }
+  }
+
+  async transferRegistrationLeader(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const requester = request.user as any;
+      const { id } = request.params as { id: string };
+      const { new_leader_id } = request.body as { new_leader_id: string };
+
+      if (!new_leader_id) {
+        return reply.status(400).send({ error: 'O ID do novo líder é obrigatório.' });
+      }
+
+      const updated = await ecdService.transferRegistrationLeader(id, new_leader_id);
+
+      // 📝 LOG: Auditoria rastreando o remanejamento da ficha entre líderes
+      AuditService.log(requester.sub, 'TRANSFER_LEADER', 'ECD_REGISTRATION', id, { new_leader_id });
+
+      return reply.send({ success: true, registration: updated });
+    } catch (error: any) {
+      console.error("Erro na transferência de líder:", error);
+      return reply.status(400).send({ error: error.message || 'Erro ao transferir titularidade da ficha.' });
     }
   }
 }

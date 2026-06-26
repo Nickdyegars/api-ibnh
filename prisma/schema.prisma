@@ -186,6 +186,7 @@ model SiteCell {
   created_at   DateTime? @default(now()) @db.Timestamptz(3)
   updated_at   DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
   image_url    String?
+  ecdLeaders  EcdLeader[]
 
   @@map("site_cells")
   @@schema("app")
@@ -424,34 +425,43 @@ model LandingPageConfig {
 // ==========================================
 
 model EcdLeader {
-  id                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name               String   @db.VarChar(255)
-  
-  total_yellow_slots Int      @default(0)
-  used_yellow_slots  Int      @default(0) 
-  total_green_slots  Int      @default(0)
-  used_green_slots   Int      @default(0) 
-  
-  is_active          Boolean  @default(true)
-  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  tokens             EcdToken[]
-  registrations      EcdRegistration[]
+  // 👇 Adicionamos o nome de volta e deixamos o cellId opcional (?)
+  name      String?  @db.VarChar(255) 
+  cellId    String?  @map("cell_id") @db.Uuid
+  cell      SiteCell? @relation(fields: [cellId], references: [id], onDelete: Cascade)
+
+  editionId String   @map("edition_id") @db.Uuid
+  edition   EcdEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)
+
+  totalYellowSlots Int @default(0) @map("total_yellow_slots")
+  usedYellowSlots  Int @default(0) @map("used_yellow_slots")
+  
+  totalGreenSlots  Int @default(0) @map("total_green_slots")
+  usedGreenSlots   Int @default(0) @map("used_green_slots")
+
+  registrations EcdRegistration[]
+  tokens        EcdToken[]
 
   @@map("ecd_leaders")
   @@schema("app")
 }
 
 model EcdToken {
-  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  token_code   String   @unique @default(dbgenerated("uuid_generate_v4()")) @db.Uuid 
-  token_type   String   @db.VarChar(50) // "AMARELA" ou "VERDE"
-  is_used      Boolean  @default(false)
-  usedAt       DateTime? @db.Timestamptz(3)
+  // O próprio ID será o token único gerado por UUID e usado na URL
+  id        String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tokenType String    @map("token_type") @db.VarChar(50) // "AMARELA" ou "VERDE"
+  isUsed    Boolean   @default(false) @map("is_used")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
 
-  leader_id    String   @db.Uuid
-  leader       EcdLeader @relation(fields: [leader_id], references: [id], onDelete: Cascade)
+  // Relacionamento com o Líder
+  leaderId  String    @map("leader_id") @db.Uuid
+  leader    EcdLeader @relation(fields: [leaderId], references: [id], onDelete: Cascade)
   
+  // Relacionamento 1:1 inverso com a Inscrição
   registration EcdRegistration?
 
   @@map("ecd_tokens")
@@ -467,7 +477,10 @@ model EcdEdition {
   is_active     Boolean  @default(false)
   created_at    DateTime @default(now()) @db.Timestamptz(3)
   public_token String?  @unique @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  encontristaPaymentLink String? @map("encontrista_payment_link") @db.Text
+  workerPaymentLink      String? @map("worker_payment_link") @db.Text
   worker_leaders       EcdWorkerLeader[]
+  leaders     EcdLeader[]
 
   registrations EcdRegistration[] 
   worker_slots_config EcdEditionWorkerSlot[]

@@ -52,5 +52,7 @@ export async function ecdRoutes(app: FastifyInstance) {
     childApp.put('/registrations/:id/approve', (req, rep) => ecdController.approveRegistration(req, rep));
 
     childApp.patch('/registrations/:id/receipt', (req, rep) => ecdController.uploadReceiptAdmin(req, rep));
+    // Vincular à rota de transferência de titularidade do token
+    childApp.patch('/registrations/:id/transfer-leader', (req, rep) => ecdController.transferRegistrationLeader(req, rep));
   });
 }

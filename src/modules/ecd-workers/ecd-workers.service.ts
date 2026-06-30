@@ -308,12 +308,38 @@ export class EcdWorkersService {
     }
 
     async approveRegistration(id: string, editionId: string, areaId: string, leaderId: string, paymentStatus: string, receiptUrl?: string) {
+
+        // 1. VALIDAÇÃO DO LIMITE DE TRABALHADORES DA EDIÇÃO
+        const edition = await prisma.ecdEdition.findUnique({
+            where: { id: editionId }
+        });
+
+        if (!edition) throw new Error("Edição não encontrada.");
+
+        // Verifica se a edição possui um limite cadastrado (maior que zero)
+        if (edition.worker_slots && edition.worker_slots > 0) {
+
+            // Conta quantos voluntários JÁ ESTÃO APROVADOS nesta edição
+            const approvedCount = await prisma.ecdWorkerRegistration.count({
+                where: {
+                    edition_id: editionId,
+                    status: 'APROVADO'
+                }
+            });
+
+            // Bloqueia a aprovação se o limite já foi atingido
+            if (approvedCount >= edition.worker_slots) {
+                throw new Error(`Aprovação bloqueada! O limite de ${edition.worker_slots} trabalhadores para esta edição já foi atingido.`);
+            }
+        }
+
+        // 2. SE PASSOU DA VALIDAÇÃO, CONTINUA O FLUXO NORMAL
         const dataToUpdate: any = {
             status: 'APROVADO',
             edition_id: editionId,
             area_id: areaId,
             leader_id: leaderId,
-            payment_status: paymentStatus // Atualiza o status financeiro junto!
+            payment_status: paymentStatus
         };
 
         if (receiptUrl) {
@@ -325,7 +351,6 @@ export class EcdWorkersService {
             data: dataToUpdate
         });
     }
-
     // Atualiza os dados de texto da ficha (Usado para corrigir dados do Áudio)
     async updateRegistrationData(id: string, data: any) {
         return await prisma.ecdWorkerRegistration.update({

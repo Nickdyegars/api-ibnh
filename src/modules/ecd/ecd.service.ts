@@ -1,6 +1,6 @@
 import { prisma } from '../../shared/database/prisma.js';
 import { RegisterEcdType, EditionEcdType } from './ecd.schemas.js';
-import { uploadImage } from '../../shared/storage/minio.js';
+import { uploadImage, deleteImage } from '../../shared/storage/minio.js';
 
 export class EcdService {
 
@@ -47,6 +47,31 @@ export class EcdService {
 
     if (!tokenRecord) throw new Error("TOKEN_NOT_FOUND");
     if (tokenRecord.isUsed) throw new Error("TOKEN_ALREADY_USED");
+
+    // 👇 TRAVA MASTER DO EVENTO 👇
+    if (tokenRecord.leader.editionId) {
+
+      // Busca a edição manualmente usando o ID que o líder possui
+      const edition = await prisma.ecdEdition.findUnique({
+        where: { id: tokenRecord.leader.editionId }
+      });
+
+      if (edition) {
+        const totalMaximoPermitido = (edition.yellow_slots || 0) + (edition.green_slots || 0);
+
+        // Conta quantas fichas ativas/pendentes existem vinculadas aos líderes desta edição
+        const totalInscritosAtuais = await prisma.ecdRegistration.count({
+          where: {
+            leader: { editionId: edition.id },
+            status: { in: ['ATIVO', 'PENDENTE'] }
+          }
+        });
+
+        if (totalMaximoPermitido > 0 && totalInscritosAtuais >= totalMaximoPermitido) {
+          throw new Error(`Inscrições encerradas! O limite máximo de ${totalMaximoPermitido} vagas para este Encontro foi atingido.`);
+        }
+      }
+    }
 
     let profileUrl = null, receiptUrl = null;
     if (files.profilePhoto) profileUrl = await uploadImage(files.profilePhoto.filename, files.profilePhoto.buffer, files.profilePhoto.mimetype, 'ecd/profiles');
@@ -136,6 +161,8 @@ export class EcdService {
       throw new Error("Não é possível reduzir a cota abaixo do que já foi utilizado.");
     }
 
+    await this._checkQuotaAvailability(leader.editionId, id, yellowSlots, greenSlots);
+
     // Calcula quantos links faltam gerar
     const currentYellow = leader.tokens.filter(t => t.tokenType === 'AMARELA').length;
     const currentGreen = leader.tokens.filter(t => t.tokenType === 'VERDE').length;
@@ -203,6 +230,21 @@ export class EcdService {
     const reg = await prisma.ecdRegistration.findUnique({ where: { id } });
     if (!reg) throw new Error("Ficha não encontrada.");
 
+    // 👇 1. APAGA AS IMAGENS DO MINIO PRIMEIRO 👇
+    try {
+      if (reg.profile_photo_url) {
+        await deleteImage(reg.profile_photo_url);
+      }
+      if (reg.receipt_photo_url) {
+        await deleteImage(reg.receipt_photo_url);
+      }
+    } catch (err) {
+      // Usamos um try-catch aqui para que, se a imagem já não existir no MinIO 
+      // por algum motivo, o sistema não trave e continue a apagar do banco.
+      console.warn(`[MinIO] Aviso ao deletar imagens da ficha ${id}:`, err);
+    }
+
+    // 2. TRANSAÇÃO: APAGA DO BANCO E DEVOLVE AS COTAS/TOKENS
     return await prisma.$transaction(async (tx) => {
       await tx.ecdRegistration.delete({ where: { id } });
 
@@ -219,7 +261,7 @@ export class EcdService {
       if (reg.token_id) {
         await tx.ecdToken.update({
           where: { id: reg.token_id },
-          data: { isUsed: false, usedAt: null }
+          data: { isUsed: false, usedAt: null } // Volta o token para o estado virgem
         });
       }
 
@@ -391,12 +433,65 @@ export class EcdService {
   }
 
   async deleteEdition(id: string) {
-    return await prisma.ecdEdition.delete({ where: { id } });
+    return await prisma.$transaction(async (tx) => {
+
+      // 1. Busca todos os líderes atrelados a esta edição
+      const leaders = await tx.ecdLeader.findMany({
+        where: { editionId: id },
+        select: { id: true }
+      });
+      const leaderIds = leaders.map(l => l.id);
+
+      if (leaderIds.length > 0) {
+
+        // 2. Busca todas as inscrições PENDENTES destes líderes
+        const pendingRegistrations = await tx.ecdRegistration.findMany({
+          where: {
+            leader_id: { in: leaderIds },
+            status: 'PENDENTE'
+          }
+        });
+
+        // 3. Apaga as fotos e comprovantes do MinIO (Limpeza de lixo)
+        for (const reg of pendingRegistrations) {
+          try {
+            if (reg.profile_photo_url) await deleteImage(reg.profile_photo_url);
+            if (reg.receipt_photo_url) await deleteImage(reg.receipt_photo_url);
+          } catch (err) {
+            console.warn(`[MinIO] Erro ao deletar mídia da ficha pendente ${reg.id}`, err);
+          }
+        }
+
+        // 4. Apaga as inscrições PENDENTES do banco de dados
+        if (pendingRegistrations.length > 0) {
+          await tx.ecdRegistration.deleteMany({
+            where: { id: { in: pendingRegistrations.map(r => r.id) } }
+          });
+        }
+
+        // 5. Apaga os links (tokens) gerados para estes líderes
+        await tx.ecdToken.deleteMany({
+          where: { leaderId: { in: leaderIds } }
+        });
+
+        // 6. Apaga os Líderes desta edição
+        // NOTA: Se houver alguma ficha ATIVA ou CONCLUÍDA atrelada a este líder, 
+        // o Prisma vai disparar o erro P2003 aqui, abortando a exclusão e protegendo o histórico!
+        await tx.ecdLeader.deleteMany({
+          where: { editionId: id }
+        });
+      }
+
+      // 7. Por fim, apaga a Edição
+      return await tx.ecdEdition.delete({ where: { id } });
+    });
   }
 
   async createLeaderWithTokens(name: string, yellowSlots: number, greenSlots: number) {
     const latestEdition = await prisma.ecdEdition.findFirst({ orderBy: { created_at: 'desc' } });
     if (!latestEdition) throw new Error("Nenhuma edição ativa encontrada.");
+
+    await this._checkQuotaAvailability(latestEdition.id, null, yellowSlots, greenSlots);
 
     return await prisma.$transaction(async (tx) => {
       // Cria o líder avulso, sem cellId
@@ -423,6 +518,33 @@ export class EcdService {
 
   async deleteLeader(id: string) {
     return await prisma.ecdLeader.delete({ where: { id } });
+  }
+
+  private async _checkQuotaAvailability(editionId: string, leaderIdToIgnore: string | null, reqYellow: number, reqGreen: number) {
+    const edition = await prisma.ecdEdition.findUnique({ where: { id: editionId } });
+    if (!edition) throw new Error("Edição não encontrada.");
+
+    // Busca todos os líderes desta edição (ignorando o líder atual se for uma atualização)
+    const otherLeaders = await prisma.ecdLeader.findMany({
+      where: {
+        editionId: editionId,
+        ...(leaderIdToIgnore ? { id: { not: leaderIdToIgnore } } : {})
+      }
+    });
+
+    const yellowAllocated = otherLeaders.reduce((sum, l) => sum + (l.totalYellowSlots || 0), 0);
+    const greenAllocated = otherLeaders.reduce((sum, l) => sum + (l.totalGreenSlots || 0), 0);
+
+    const availableYellow = edition.yellow_slots - yellowAllocated;
+    const availableGreen = edition.green_slots - greenAllocated;
+
+    if (reqYellow > availableYellow) {
+      throw new Error(`Cota Amarela indisponível! O evento possui apenas ${availableYellow} vagas amarelas livres para distribuição.`);
+    }
+
+    if (reqGreen > availableGreen) {
+      throw new Error(`Cota Verde indisponível! O evento possui apenas ${availableGreen} vagas verdes livres para distribuição.`);
+    }
   }
 
 }

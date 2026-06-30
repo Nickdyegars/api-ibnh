@@ -98,6 +98,8 @@ export class EcdService {
           leader_id: tokenRecord.leaderId,
           token_id: tokenRecord.id, // Salva qual token gerou esta ficha
 
+          edition_id: tokenRecord.leader.editionId,
+
           lgpd_consent: data.lgpdConsent,
           lgpd_consent_date: data.lgpdConsentDate ? new Date(data.lgpdConsentDate) : new Date(),
           lgpd_terms_version: data.lgpdTermsVersion || '1.0'

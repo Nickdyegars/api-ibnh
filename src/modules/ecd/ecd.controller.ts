@@ -4,6 +4,9 @@ import { EcdService } from './ecd.service.js';
 import { registerEcdSchema, editionEcdSchema } from './ecd.schemas.js';
 // 👇 Importando o nosso serviço de Auditoria
 import { AuditService } from '../../shared/services/audit/audit.service.js';
+import PDFDocument from 'pdfkit';
+import { PassThrough } from 'stream';
+import { prisma } from '../../shared/database/prisma.js';
 
 const ecdService = new EcdService();
 
@@ -308,4 +311,200 @@ export class EcdController {
       return reply.status(400).send({ error: error.message || 'Erro ao transferir titularidade da ficha.' });
     }
   }
+
+  async generateEditionReport(request: any, reply: any) {
+    const { id } = request.params;
+
+    try {
+      const edition = await prisma.ecdEdition.findUnique({
+        where: { id }
+      });
+
+      if (!edition) {
+        return reply.status(404).send({ error: "Edição não encontrada." });
+      }
+
+      // Busca Trabalhadores Aprovados
+      const workers = await prisma.ecdWorkerRegistration.findMany({
+        where: {
+          edition_id: id,
+          status: 'APROVADO'
+        },
+        select: {
+          full_name: true,
+          gender: true,
+          age: true,
+          area: { select: { name: true } },
+          leader: { select: { name: true } }
+        },
+        orderBy: { area: { name: 'asc' } }
+      });
+
+      // 🔍 CORREÇÃO AQUI: Mudamos de 'APROVADO' para 'ATIVO' (conforme o padrão do seu model)
+      const attendees = await prisma.ecdRegistration.findMany({
+        where: {
+          edition_id: id,
+          status: 'ATIVO' // 👈 Bate com o @default("ATIVO") do seu schema
+        },
+        select: {
+          full_name: true,
+          gender: true,
+          age: true
+        },
+        orderBy: { full_name: 'asc' }
+      });
+
+      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+
+      reply.header('Content-Type', 'application/pdf');
+      reply.header('Content-Disposition', `attachment; filename="Relatorio-${edition.name.replace(/\s+/g, '-')}.pdf"`);
+
+      reply.send(doc);
+
+      // ==========================================
+      // DESIGN & LAYOUT PROFISSIONAL
+      // ==========================================
+
+      // Barra Decorativa Superior (Tom Azul Igreja / Corporativo)
+      doc.rect(0, 0, doc.page.width, 15).fill('#1e3a8a');
+      doc.moveDown(1.5);
+
+      // Cabeçalho Principal
+      doc.fillColor('#1e293b')
+        .fontSize(22)
+        .font('Helvetica-Bold')
+        .text('RELATÓRIO DE ENCERRAMENTO', { align: 'center', characterSpacing: 1 });
+
+      doc.fontSize(14)
+        .font('Helvetica')
+        .fillColor('#475569')
+        .text(edition.name.toUpperCase(), { align: 'center' });
+
+      // Linha divisória fina
+      doc.moveDown(1);
+      doc.moveTo(40, doc.y).lineTo(doc.page.width - 40, doc.y).strokeColor('#e2e8f0').lineWidth(1).stroke();
+      doc.moveDown(1.5);
+
+      // Card de Resumo Geral
+      const startY = doc.y;
+      doc.rect(40, startY, doc.page.width - 80, 55).fill('#f8fafc');
+      doc.rect(40, startY, doc.page.width - 80, 55).strokeColor('#cbd5e1').stroke();
+
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(11).text('RESUMO DO EVENTO', 55, startY + 10);
+      doc.font('Helvetica').fontSize(10).fillColor('#475569');
+      doc.text(`Total de Voluntários / Equipe: `, 55, startY + 28);
+      doc.font('Helvetica-Bold').text(`${workers.length}`, 210, startY + 28);
+
+      doc.font('Helvetica').text(`Total de Encontristas: `, 300, startY + 28);
+      doc.font('Helvetica-Bold').text(`${attendees.length}`, 410, startY + 28);
+
+      // Restaura posicionamento abaixo do card
+      doc.x = 40;
+      doc.y = startY + 75;
+
+      // ==========================================
+      // SEÇÃO: TRABALHADORES
+      // ==========================================
+      doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(14).text('EQUIPE E TRABALHADORES ALOCADOS');
+      doc.moveDown(0.5);
+
+      if (workers.length === 0) {
+        doc.font('Helvetica-Oblique').fontSize(10).fillColor('#94a3b8').text('Nenhum trabalhador aprovado nesta edição.');
+        doc.moveDown(1);
+      } else {
+        let currentArea = '';
+        workers.forEach((worker) => {
+          const areaName = worker.area?.name || 'Sem Área';
+
+          if (areaName !== currentArea) {
+            doc.moveDown(0.8);
+            doc.fillColor('#2563eb').font('Helvetica-Bold').fontSize(11).text(`■ ÁREA: ${areaName.toUpperCase()}`);
+            doc.fillColor('#334155').font('Helvetica').fontSize(10);
+            currentArea = areaName;
+          }
+
+          const leaderText = worker.leader?.name ? ` | Líder: ${worker.leader.name}` : '';
+          doc.text(`   • ${worker.full_name} (${worker.age} anos) | Sexo: ${worker.gender}${leaderText}`);
+        });
+      }
+
+      doc.moveDown(2.5);
+
+      // ==========================================
+      // SEÇÃO: ENCONTRISTAS
+      // ==========================================
+      doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(14).text('LISTA FINAL DE ENCONTRISTAS');
+      doc.moveDown(0.5);
+
+      if (attendees.length === 0) {
+        doc.font('Helvetica-Oblique').fontSize(10).fillColor('#94a3b8').text('Nenhum encontrista encontrado ou ativo nesta edição.');
+      } else {
+        doc.fillColor('#334155').font('Helvetica').fontSize(10);
+        attendees.forEach((attendee, index) => {
+          doc.text(`   ${index + 1}. ${attendee.full_name} (${attendee.age} anos) | Sexo: ${attendee.gender}`);
+        });
+      }
+
+      // Rodapé Simples
+      const totalPages = doc.bufferedPageRange().count;
+      for (let i = 0; i < totalPages; i++) {
+        doc.switchToPage(i);
+        doc.fontSize(8).fillColor('#94a3b8').text(
+          `Gerado em ${new Date().toLocaleDateString('pt-BR')} | IBNH Painel`,
+          40,
+          doc.page.height - 30,
+          { align: 'center' }
+        );
+      }
+
+      doc.end();
+      return reply;
+
+    } catch (error) {
+      console.error("Erro ao gerar PDF:", error);
+      if (!reply.sent) {
+        return reply.status(500).send({ error: "Erro interno ao gerar o relatório." });
+      }
+    }
+  }
+
+  async finalizeEdition(request: any, reply: any) {
+        const { id } = request.params; // ID da edição que será finalizada
+
+        try {
+            // Verifica se a edição existe
+            const edition = await prisma.ecdEdition.findUnique({
+                where: { id }
+            });
+
+            if (!edition) {
+                return reply.status(404).send({ error: "Edição não encontrada." });
+            }
+
+            // 1. DELETA TODOS OS ENCONTRISTAS DA EDIÇÃO
+            const deletedAttendees = await prisma.ecdRegistration.deleteMany({
+                where: { edition_id: id }
+            });
+
+            // 2. DELETA TODOS OS TRABALHADORES DA EDIÇÃO
+            const deletedWorkers = await prisma.ecdWorkerRegistration.deleteMany({
+                where: { edition_id: id }
+            });
+
+            // ⚠️ Futuramente: Aqui entrará a lógica de apagar as fotos do MinIO
+            // e salvar os números no Histórico Consolidado.
+
+            return reply.send({ 
+                message: "Edição finalizada e limpa com sucesso.",
+                details: {
+                    encontristasRemovidos: deletedAttendees.count,
+                    trabalhadoresRemovidos: deletedWorkers.count
+                }
+            });
+
+        } catch (error) {
+            console.error("Erro ao finalizar edição:", error);
+            return reply.status(500).send({ error: "Erro interno ao limpar os dados da edição." });
+        }
+    }
 }

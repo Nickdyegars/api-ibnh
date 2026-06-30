@@ -539,8 +539,8 @@ model EcdRegistration {
   
   // Controle de Histórico e LGPD
   status              String   @default("ATIVO") 
-  edition_id          String?  @db.Uuid
-  edition             EcdEdition? @relation(fields: [edition_id], references: [id])
+  edition_id          String  @db.Uuid
+  edition             EcdEdition @relation(fields: [edition_id], references: [id])
   lgpd_consent        Boolean  @default(false)
   lgpd_consent_date   DateTime @default(now())
   lgpd_terms_version  String   @default("1.0")

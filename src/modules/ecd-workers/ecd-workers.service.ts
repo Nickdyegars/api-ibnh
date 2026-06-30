@@ -333,6 +333,30 @@ export class EcdWorkersService {
             }
         }
 
+        // 1.5. VALIDAÇÃO DO LIMITE DE VAGAS DO LÍDER (A TRAVA NOVA!)
+        const leader = await prisma.ecdWorkerLeader.findUnique({
+            where: { id: leaderId }
+        });
+
+        if (!leader) throw new Error("Líder não encontrado.");
+
+        // Verifica se o líder possui um limite definido
+        if (leader.slots && leader.slots > 0) {
+
+            // Conta quantos voluntários JÁ ESTÃO APROVADOS para este líder
+            const approvedLeaderCount = await prisma.ecdWorkerRegistration.count({
+                where: {
+                    leader_id: leaderId,
+                    status: 'APROVADO' // Conta apenas quem realmente está dentro da equipe
+                }
+            });
+
+            // Bloqueia a aprovação se a cota deste líder já foi atingida
+            if (approvedLeaderCount >= leader.slots) {
+                throw new Error(`Aprovação bloqueada! O líder ${leader.name} já preencheu todas as ${leader.slots} vagas.`);
+            }
+        }
+
         // 2. SE PASSOU DA VALIDAÇÃO, CONTINUA O FLUXO NORMAL
         const dataToUpdate: any = {
             status: 'APROVADO',

@@ -58,5 +58,6 @@ export async function ecdRoutes(app: FastifyInstance) {
     // Finalização de edicao
     childApp.get('/:id/report', ecdController.generateEditionReport);
     childApp.post('/:id/finalize', (req, rep) => ecdController.finalizeEdition(req, rep));
+    childApp.get('/history', (req, rep) => ecdController.getEditionHistory(req, rep));
   });
 }

@@ -7,6 +7,7 @@ import { AuditService } from '../../shared/services/audit/audit.service.js';
 import PDFDocument from 'pdfkit';
 import { PassThrough } from 'stream';
 import { prisma } from '../../shared/database/prisma.js';
+import { deleteImage } from '../../shared/storage/minio.js'; // Ajuste o caminho das pastas se necessário
 
 const ecdService = new EcdService();
 
@@ -324,68 +325,82 @@ export class EcdController {
         return reply.status(404).send({ error: "Edição não encontrada." });
       }
 
-      // Busca Trabalhadores Aprovados
+      // 1. Busca Trabalhadores
       const workers = await prisma.ecdWorkerRegistration.findMany({
-        where: {
-          edition_id: id,
-          status: 'APROVADO'
-        },
+        where: { edition_id: id, status: 'APROVADO' },
         select: {
           full_name: true,
           gender: true,
           age: true,
+          phone: true,
           area: { select: { name: true } },
           leader: { select: { name: true } }
         },
         orderBy: { area: { name: 'asc' } }
       });
 
-      // 🔍 CORREÇÃO AQUI: Mudamos de 'APROVADO' para 'ATIVO' (conforme o padrão do seu model)
+      // 2. Busca Encontristas ativos
       const attendees = await prisma.ecdRegistration.findMany({
-        where: {
-          edition_id: id,
-          status: 'ATIVO' // 👈 Bate com o @default("ATIVO") do seu schema
-        },
+        where: { edition_id: id, status: 'ATIVO' },
         select: {
           full_name: true,
           gender: true,
-          age: true
+          age: true,
+          phone: true,
+          in_cell: true,
+          cell_leader_name: true,
+          invited_by: true,
+          leader: { select: { name: true } }
         },
         orderBy: { full_name: 'asc' }
       });
 
-      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const doc = new PDFDocument({
+        size: 'A4',
+        bufferPages: true,
+        margins: { top: 40, left: 40, right: 40, bottom: 10 }
+      });
 
       reply.header('Content-Type', 'application/pdf');
       reply.header('Content-Disposition', `attachment; filename="Relatorio-${edition.name.replace(/\s+/g, '-')}.pdf"`);
 
       reply.send(doc);
 
-      // ==========================================
-      // DESIGN & LAYOUT PROFISSIONAL
-      // ==========================================
+      // HELPER DE TABELA
+      const drawTableRow = (c1: string, c2: string, c3: string, c4: string, isHeader = false) => {
+        if (doc.y > 750) {
+          doc.addPage();
+          doc.y = 40;
+        }
 
-      // Barra Decorativa Superior (Tom Azul Igreja / Corporativo)
+        const y = doc.y;
+        doc.font(isHeader ? 'Helvetica-Bold' : 'Helvetica').fontSize(isHeader ? 10 : 9);
+        doc.fillColor(isHeader ? '#1e3a8a' : '#334155');
+
+        doc.text(c1, 40, y, { width: 175, height: 15, lineBreak: false, ellipsis: true });
+        doc.text(c2, 220, y, { width: 75, height: 15, lineBreak: false, ellipsis: true });
+        doc.text(c3, 300, y, { width: 85, height: 15, lineBreak: false, ellipsis: true });
+        doc.text(c4, 390, y, { width: 165, height: 15, lineBreak: false, ellipsis: true });
+
+        doc.moveTo(40, y + 14).lineTo(555, y + 14).strokeColor(isHeader ? '#cbd5e1' : '#f1f5f9').lineWidth(1).stroke();
+        doc.y = y + 20;
+      };
+
+      // LAYOUT CABEÇALHO
       doc.rect(0, 0, doc.page.width, 15).fill('#1e3a8a');
       doc.moveDown(1.5);
 
-      // Cabeçalho Principal
-      doc.fillColor('#1e293b')
-        .fontSize(22)
-        .font('Helvetica-Bold')
+      doc.fillColor('#1e293b').fontSize(22).font('Helvetica-Bold')
         .text('RELATÓRIO DE ENCERRAMENTO', { align: 'center', characterSpacing: 1 });
 
-      doc.fontSize(14)
-        .font('Helvetica')
-        .fillColor('#475569')
+      doc.fontSize(14).font('Helvetica').fillColor('#475569')
         .text(edition.name.toUpperCase(), { align: 'center' });
 
-      // Linha divisória fina
       doc.moveDown(1);
       doc.moveTo(40, doc.y).lineTo(doc.page.width - 40, doc.y).strokeColor('#e2e8f0').lineWidth(1).stroke();
       doc.moveDown(1.5);
 
-      // Card de Resumo Geral
+      // CARD RESUMO
       const startY = doc.y;
       doc.rect(40, startY, doc.page.width - 80, 55).fill('#f8fafc');
       doc.rect(40, startY, doc.page.width - 80, 55).strokeColor('#cbd5e1').stroke();
@@ -398,65 +413,76 @@ export class EcdController {
       doc.font('Helvetica').text(`Total de Encontristas: `, 300, startY + 28);
       doc.font('Helvetica-Bold').text(`${attendees.length}`, 410, startY + 28);
 
-      // Restaura posicionamento abaixo do card
       doc.x = 40;
       doc.y = startY + 75;
 
-      // ==========================================
-      // SEÇÃO: TRABALHADORES
-      // ==========================================
+      // SEÇÃO TRABALHADORES
       doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(14).text('EQUIPE E TRABALHADORES ALOCADOS');
-      doc.moveDown(0.5);
+      doc.moveDown(0.8);
 
       if (workers.length === 0) {
         doc.font('Helvetica-Oblique').fontSize(10).fillColor('#94a3b8').text('Nenhum trabalhador aprovado nesta edição.');
-        doc.moveDown(1);
+        doc.moveDown(2);
       } else {
         let currentArea = '';
         workers.forEach((worker) => {
           const areaName = worker.area?.name || 'Sem Área';
-
           if (areaName !== currentArea) {
-            doc.moveDown(0.8);
+            doc.moveDown(0.5);
             doc.fillColor('#2563eb').font('Helvetica-Bold').fontSize(11).text(`■ ÁREA: ${areaName.toUpperCase()}`);
-            doc.fillColor('#334155').font('Helvetica').fontSize(10);
+            doc.moveDown(0.3);
+            drawTableRow('Nome do Voluntário', 'Perfil', 'Contato', 'Líder Direto', true);
             currentArea = areaName;
           }
-
-          const leaderText = worker.leader?.name ? ` | Líder: ${worker.leader.name}` : '';
-          doc.text(`   • ${worker.full_name} (${worker.age} anos) | Sexo: ${worker.gender}${leaderText}`);
+          const leaderName = worker.leader?.name || '-';
+          const phone = worker.phone || '-';
+          const profile = `${worker.age} anos | ${worker.gender === 'M' ? 'Masc' : 'Fem'}`;
+          drawTableRow(`• ${worker.full_name}`, profile, phone, leaderName);
         });
       }
 
-      doc.moveDown(2.5);
+      doc.moveDown(2);
 
-      // ==========================================
-      // SEÇÃO: ENCONTRISTAS
-      // ==========================================
-      doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(14).text('LISTA FINAL DE ENCONTRISTAS');
-      doc.moveDown(0.5);
+      // 👇 RESET DO CURSOR PARA EVITAR O TITULO QUEBRADO NA DIREITA 👇
+      doc.x = 40;
+      doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(14).text('LISTA FINAL DE ENCONTRISTAS', { width: 515 });
+      doc.moveDown(0.8);
 
       if (attendees.length === 0) {
         doc.font('Helvetica-Oblique').fontSize(10).fillColor('#94a3b8').text('Nenhum encontrista encontrado ou ativo nesta edição.');
       } else {
-        doc.fillColor('#334155').font('Helvetica').fontSize(10);
+        drawTableRow('Nome do Encontrista', 'Perfil', 'Contato', 'Origem (Célula / Convite)', true);
+
         attendees.forEach((attendee, index) => {
-          doc.text(`   ${index + 1}. ${attendee.full_name} (${attendee.age} anos) | Sexo: ${attendee.gender}`);
+          const phone = attendee.phone || '-';
+          const profile = `${attendee.age} anos | ${attendee.gender === 'M' ? 'Masc' : 'Fem'}`;
+
+          let origin = '-';
+          if (attendee.cell_leader_name && attendee.cell_leader_name !== 'Origem Desconhecida') {
+            origin = `Célula: ${attendee.cell_leader_name}`;
+          } else if (attendee.leader?.name) {
+            origin = `Líder: ${attendee.leader.name}`;
+          } else if (attendee.invited_by) {
+            origin = `Convite: ${attendee.invited_by}`;
+          }
+
+          drawTableRow(`${index + 1}. ${attendee.full_name}`, profile, phone, origin);
         });
       }
 
-      // Rodapé Simples
+      // RODAPÉ
       const totalPages = doc.bufferedPageRange().count;
       for (let i = 0; i < totalPages; i++) {
         doc.switchToPage(i);
         doc.fontSize(8).fillColor('#94a3b8').text(
-          `Gerado em ${new Date().toLocaleDateString('pt-BR')} | IBNH Painel`,
+          `Gerado em ${new Date().toLocaleDateString('pt-BR')} | IBNH Painel - Página ${i + 1} de ${totalPages}`,
           40,
           doc.page.height - 30,
           { align: 'center' }
         );
       }
 
+      doc.flushPages();
       doc.end();
       return reply;
 
@@ -469,42 +495,171 @@ export class EcdController {
   }
 
   async finalizeEdition(request: any, reply: any) {
-        const { id } = request.params; // ID da edição que será finalizada
+    const { id } = request.params;
 
-        try {
-            // Verifica se a edição existe
-            const edition = await prisma.ecdEdition.findUnique({
-                where: { id }
-            });
+    try {
+      const edition = await prisma.ecdEdition.findUnique({
+        where: { id }
+      });
 
-            if (!edition) {
-                return reply.status(404).send({ error: "Edição não encontrada." });
-            }
+      if (!edition) return reply.status(404).send({ error: "Edição não encontrada." });
 
-            // 1. DELETA TODOS OS ENCONTRISTAS DA EDIÇÃO
-            const deletedAttendees = await prisma.ecdRegistration.deleteMany({
-                where: { edition_id: id }
-            });
-
-            // 2. DELETA TODOS OS TRABALHADORES DA EDIÇÃO
-            const deletedWorkers = await prisma.ecdWorkerRegistration.deleteMany({
-                where: { edition_id: id }
-            });
-
-            // ⚠️ Futuramente: Aqui entrará a lógica de apagar as fotos do MinIO
-            // e salvar os números no Histórico Consolidado.
-
-            return reply.send({ 
-                message: "Edição finalizada e limpa com sucesso.",
-                details: {
-                    encontristasRemovidos: deletedAttendees.count,
-                    trabalhadoresRemovidos: deletedWorkers.count
-                }
-            });
-
-        } catch (error) {
-            console.error("Erro ao finalizar edição:", error);
-            return reply.status(500).send({ error: "Erro interno ao limpar os dados da edição." });
+      // 1. Busca os Trabalhadores (Agora incluindo as fotos)
+      const workers = await prisma.ecdWorkerRegistration.findMany({
+        where: { edition_id: id },
+        select: {
+          full_name: true,
+          phone: true, // 👈 ADICIONE ISTO AQUI
+          area: { select: { name: true } },
+          leader: { select: { name: true } },
+          profile_photo_url: true,
+          status: true
         }
+      });
+
+      // 2. Busca os Encontristas (Agora incluindo as fotos)
+      const attendees = await prisma.ecdRegistration.findMany({
+        where: { edition_id: id },
+        select: {
+          full_name: true,
+          gender: true,
+          age: true,
+          phone: true, // 👈 ADICIONE ISTO AQUI
+          in_cell: true,
+          cell_leader_name: true,
+          invited_by: true,
+          leader: { select: { name: true } },
+          profile_photo_url: true,
+          receipt_photo_url: true,
+          status: true
+        }
+      });
+
+      // Filtra apenas os "ATIVOS" / "APROVADOS" para salvar no JSON Histórico
+      const approvedWorkers = workers.filter(w => w.status === 'APROVADO');
+      const activeAttendees = attendees.filter(a => a.status === 'ATIVO');
+
+      const workersSnapshot = approvedWorkers.map(w => ({
+        full_name: w.full_name,
+        phone: w.phone || 'Sem número', // 👈 Salvando o telefone
+        area_name: w.area?.name || 'Sem Área',
+        leader_name: w.leader?.name || 'N/A'
+      }));
+
+      const attendeesSnapshot = activeAttendees.map(a => {
+        let origin = 'Não informado';
+
+        // 👇 A Lógica robusta em cascata (Idêntica ao PDF)
+        if (a.cell_leader_name && a.cell_leader_name !== 'Origem Desconhecida') {
+          origin = `Célula: ${a.cell_leader_name}`;
+        } else if (a.leader?.name) {
+          origin = `Líder: ${a.leader.name}`;
+        } else if (a.invited_by) {
+          origin = `Convite: ${a.invited_by}`;
+        }
+
+        return {
+          full_name: a.full_name,
+          gender: a.gender,
+          age: a.age,
+          phone: a.phone || 'Sem número', // 👈 Salvando o telefone
+          origin: origin
+        };
+      });
+
+      // 3. SEPARA TODAS AS URLs DE FOTOS PARA DELEÇÃO
+      const filesToDelete: string[] = [];
+
+      workers.forEach(w => {
+        if (w.profile_photo_url) filesToDelete.push(w.profile_photo_url);
+      });
+
+      attendees.forEach(a => {
+        if (a.profile_photo_url) filesToDelete.push(a.profile_photo_url);
+        if (a.receipt_photo_url) filesToDelete.push(a.receipt_photo_url);
+      });
+
+      // 4. Executa a Transação no Banco de Dados
+      // 4. Executa a Transação no Banco de Dados
+      await prisma.$transaction(async (tx) => {
+
+        // A) Salva tudo no Histórico primeiro
+        await tx.ecdEditionHistory.upsert({
+          where: { edition_id: id },
+          create: {
+            edition_id: id,
+            edition_name: edition.name,
+            total_workers: workersSnapshot.length,
+            total_attendees: attendeesSnapshot.length,
+            workers_data: workersSnapshot,
+            attendees_data: attendeesSnapshot
+          },
+          update: {
+            edition_name: edition.name,
+            total_workers: workersSnapshot.length,
+            total_attendees: attendeesSnapshot.length,
+            workers_data: workersSnapshot,
+            attendees_data: attendeesSnapshot
+          }
+        });
+
+        // 👇 B) NOVO: Limpeza dos Links (Tokens) 👇
+        // Primeiro, descobrimos quem são os líderes desta edição para apagar os links deles
+        const editionLeaders = await tx.ecdLeader.findMany({
+          where: { editionId: id },
+          select: { id: true }
+        });
+        const leaderIds = editionLeaders.map(l => l.id);
+
+        if (leaderIds.length > 0) {
+          // Destrói todos os links (tokens) associados aos líderes desta edição
+          await tx.ecdToken.deleteMany({
+            where: { leaderId: { in: leaderIds } }
+          });
+        }
+
+        // C) Limpeza das Fichas e Registros
+        await tx.ecdRegistration.deleteMany({ where: { edition_id: id } });
+        await tx.ecdWorkerRegistration.deleteMany({ where: { edition_id: id } });
+
+        // 👇 D) NOVO: Limpeza das Cotas dos Líderes 👇
+        // Destrói as cotas, assim a próxima edição começará com a tela de líderes limpa
+        await tx.ecdLeader.deleteMany({ where: { editionId: id } });
+
+        // E) Desativa a Edição
+        await tx.ecdEdition.update({ where: { id }, data: { is_active: false } });
+      });
+
+      // 5. TRITURAÇÃO FÍSICA DOS ARQUIVOS NO MINIO (Assíncrono)
+      // Usamos o Promise.allSettled para garantir que, se uma foto der erro, as outras continuem sendo deletadas.
+      if (filesToDelete.length > 0) {
+        Promise.allSettled(filesToDelete.map(url => deleteImage(url)))
+          .then(() => console.log(`[STORAGE] Limpeza concluída: ${filesToDelete.length} imagens enfileiradas para exclusão no MinIO.`))
+          .catch(err => console.error("[STORAGE] Erro na fila de limpeza do MinIO:", err));
+      }
+
+      return reply.send({
+        success: true,
+        message: "Edição finalizada com sucesso! Dados migrados, registros limpos e mídias descartadas.",
+        summary: { workers_saved: workersSnapshot.length, attendees_saved: attendeesSnapshot.length }
+      });
+
+    } catch (error) {
+      console.error("Erro crítico ao finalizar edição:", error);
+      return reply.status(500).send({ error: "Erro interno ao processar encerramento da edição." });
     }
+  }
+  async getEditionHistory(request: any, reply: any) {
+    try {
+      const history = await prisma.ecdEditionHistory.findMany({
+        orderBy: { created_at: 'desc' }
+      });
+
+      return reply.send(history);
+    } catch (error) {
+      console.error("Erro ao buscar histórico:", error);
+      return reply.status(500).send({ error: "Erro interno ao buscar o histórico." });
+    }
+  }
+
 }

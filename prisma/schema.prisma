@@ -677,6 +677,25 @@ model EcdWorkerRegistration {
   @@schema("app")
 }
 
+model EcdEditionHistory {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  edition_id      String   @unique @db.Uuid
+  edition_name    String   @db.VarChar(255)
+  total_workers   Int
+  total_attendees Int
+  
+  // Guardará apenas: [{ full_name, area_name, leader_name }]
+  workers_data    Json
+  
+  // Guardará apenas: [{ full_name, gender, age }]
+  attendees_data  Json
+  
+  created_at      DateTime @default(now()) @db.Timestamptz(3)
+
+  @@map("ecd_edition_history")
+  @@schema("app")
+}
+
 model RepertoireSong {
   id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   title        String

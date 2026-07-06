@@ -535,6 +535,19 @@ export class EcdController {
         }
       });
 
+      const areaLeaders = await prisma.ecdWorkerLeader.findMany({
+        where: { edition_id: id },
+        select: {
+          name: true,
+          area: { select: { name: true } }
+        }
+      });
+
+      const cellLeaders = await prisma.ecdLeader.findMany({
+        where: { editionId: id },
+        include: { cell: true } // Isso traz os dados da célula amarrada!
+      });
+
       // Filtra apenas os "ATIVOS" / "APROVADOS" para salvar no JSON Histórico
       const approvedWorkers = workers.filter(w => w.status === 'APROVADO');
       const activeAttendees = attendees.filter(a => a.status === 'ATIVO');
@@ -567,6 +580,34 @@ export class EcdController {
         };
       });
 
+      const areaLeadersSnapshot = areaLeaders.map(al => {
+        // Conta quantos voluntários aprovados têm este líder como líder direto
+        const countLiderados = approvedWorkers.filter(w => w.leader?.name === al.name).length;
+
+        return {
+          name: al.name,
+          area_name: al.area?.name || 'Sem Área',
+          workers_count: countLiderados // 👈 Salvando a quantidade de voluntários!
+        };
+      });
+
+      const leadersSlotsSnapshot = cellLeaders.map(l => {
+        // Lógica para descobrir o nome real do líder
+        let leaderName = l.name; // Tenta pegar o nome direto (Líder Externo)
+        if (l.cell) {
+          // Se for líder interno, junta o nome do líder da célula com o nome da célula
+          leaderName = `${l.cell.leader} (${l.cell.name})`;
+        }
+
+        return {
+          name: leaderName || 'Líder Não Identificado', // Fallback seguro
+          total_yellow: l.totalYellowSlots || 0,
+          used_yellow: l.usedYellowSlots || 0,
+          total_green: l.totalGreenSlots || 0,
+          used_green: l.usedGreenSlots || 0
+        };
+      });
+
       // 3. SEPARA TODAS AS URLs DE FOTOS PARA DELEÇÃO
       const filesToDelete: string[] = [];
 
@@ -580,51 +621,53 @@ export class EcdController {
       });
 
       // 4. Executa a Transação no Banco de Dados
-      // 4. Executa a Transação no Banco de Dados
       await prisma.$transaction(async (tx) => {
 
-        // A) Salva tudo no Histórico primeiro
+        // A) Salva tudo no Histórico
         await tx.ecdEditionHistory.upsert({
-          where: { edition_id: id },
+          where: { edition_id: id }, // Aqui o seu schema pede snake_case
           create: {
             edition_id: id,
             edition_name: edition.name,
             total_workers: workersSnapshot.length,
             total_attendees: attendeesSnapshot.length,
             workers_data: workersSnapshot,
-            attendees_data: attendeesSnapshot
+            attendees_data: attendeesSnapshot,
+            area_leaders_data: areaLeadersSnapshot,
+            leaders_slots_data: leadersSlotsSnapshot
           },
           update: {
             edition_name: edition.name,
             total_workers: workersSnapshot.length,
             total_attendees: attendeesSnapshot.length,
             workers_data: workersSnapshot,
-            attendees_data: attendeesSnapshot
+            attendees_data: attendeesSnapshot,
+            area_leaders_data: areaLeadersSnapshot,
+            leaders_slots_data: leadersSlotsSnapshot
           }
         });
 
-        // 👇 B) NOVO: Limpeza dos Links (Tokens) 👇
-        // Primeiro, descobrimos quem são os líderes desta edição para apagar os links deles
+        // 👇 B) Limpeza dos Links (Tokens) 👇
         const editionLeaders = await tx.ecdLeader.findMany({
-          where: { editionId: id },
+          where: { editionId: id }, // 👈 Aqui o seu schema pede camelCase
           select: { id: true }
         });
         const leaderIds = editionLeaders.map(l => l.id);
 
         if (leaderIds.length > 0) {
-          // Destrói todos os links (tokens) associados aos líderes desta edição
+          // Destrói todos os links (tokens)
           await tx.ecdToken.deleteMany({
-            where: { leaderId: { in: leaderIds } }
+            where: { leaderId: { in: leaderIds } } // 👈 camelCase
           });
         }
 
         // C) Limpeza das Fichas e Registros
-        await tx.ecdRegistration.deleteMany({ where: { edition_id: id } });
-        await tx.ecdWorkerRegistration.deleteMany({ where: { edition_id: id } });
+        await tx.ecdRegistration.deleteMany({ where: { edition_id: id } }); // snake_case
+        await tx.ecdWorkerRegistration.deleteMany({ where: { edition_id: id } }); // snake_case
 
-        // 👇 D) NOVO: Limpeza das Cotas dos Líderes 👇
-        // Destrói as cotas, assim a próxima edição começará com a tela de líderes limpa
-        await tx.ecdLeader.deleteMany({ where: { editionId: id } });
+        // 👇 D) Limpeza das Cotas dos Líderes 👇
+        await tx.ecdLeader.deleteMany({ where: { editionId: id } }); // 👈 camelCase
+        await tx.ecdWorkerLeader.deleteMany({ where: { edition_id: id } });
 
         // E) Desativa a Edição
         await tx.ecdEdition.update({ where: { id }, data: { is_active: false } });

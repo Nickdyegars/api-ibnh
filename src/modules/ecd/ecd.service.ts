@@ -394,7 +394,8 @@ export class EcdService {
           green_slots: data.greenSlots,
           worker_slots: data.workerSlots,
           encontristaPaymentLink: data.encontristaPaymentLink ?? null,
-          workerPaymentLink: data.workerPaymentLink ?? null
+          workerPaymentLink: data.workerPaymentLink ?? null,
+          is_active: true
         }
       });
 

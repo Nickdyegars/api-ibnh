@@ -71,17 +71,29 @@ export async function deleteImage(imageUrl: string) {
     if (!imageUrl) return;
 
     try {
-        // Ex: https://files.ibnh.com.br/ibnh-uploads/pastores/123-foto.jpg
-        const bucketUrl = `${PUBLIC_URL}/${BUCKET_NAME}/`;
+        // 1. Extrai os dados de forma nativa, ignorando domínio, porta ou IP base
+        const parsedUrl = new URL(imageUrl);
+        
+        // 2. O pathname vai retornar algo como: "/ibnh-uploads/comprovantes/foto.jpg"
+        // Removemos a primeira barra e dividimos os caminhos
+        const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+        
+        // 3. O primeiro elemento após a barra sempre será o nome do bucket
+        const bucketFromUrl = pathParts[0]; 
+        
+        // 4. Todo o restante do caminho será a Key exata do arquivo no storage
+        // Ex: "comprovantes/foto.jpg" ou "profiles/foto.png"
+        const objectPath = pathParts.slice(1).join('/');
 
-        // Verifica se a imagem pertence mesmo ao nosso MinIO
-        if (imageUrl.startsWith(bucketUrl)) {
-            // Remove a parte inicial e fica apenas com "pastores/123-foto.jpg"
-            const objectPath = imageUrl.replace(bucketUrl, '');
+        // 5. Dispara a exclusão com a chave exata
+        if (bucketFromUrl === BUCKET_NAME && objectPath) {
             await minioClient.removeObject(BUCKET_NAME, objectPath);
-            console.log(`🗑️ Imagem apagada do MinIO: ${objectPath}`);
+            console.log(`🗑️ Arquivo expurgado com sucesso do MinIO: ${objectPath}`);
+        } else {
+            // Agora o console vai te avisar se algum link for ignorado!
+            console.warn(`⚠️ MinIO ignorou o link pois não pertence ao bucket '${BUCKET_NAME}': ${imageUrl}`);
         }
     } catch (error) {
-        console.error(`❌ Erro ao apagar imagem do MinIO (${imageUrl}):`, error);
+        console.error(`❌ Falha crítica ao deletar arquivo do MinIO (${imageUrl}):`, error);
     }
 }

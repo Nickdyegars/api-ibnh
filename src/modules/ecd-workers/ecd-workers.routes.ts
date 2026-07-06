@@ -80,13 +80,15 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
   });
 
   // Rota para Upload de Arquivos Diversos (Perfil/Comprovantes)
+  // Rota para Upload de Arquivos Diversos (Perfil/Comprovantes)
   app.post('/public/upload/:type', async (request, reply) => {
     try {
       const { type } = request.params as { type: string };
 
+      // 👇 CORREÇÃO: Padronizando o nome das pastas para inglês igual ao resto do sistema
       let subfolder = 'outros';
-      if (type === 'profile') subfolder = 'perfil';
-      if (type === 'receipt') subfolder = 'comprovantes';
+      if (type === 'profile') subfolder = 'profiles';
+      if (type === 'receipt') subfolder = 'receipts';
 
       // 1. TRAVA DO ADMIN: Se for comprovativo, exige JWT de Admin logado!
       if (type === 'receipt') {
@@ -149,9 +151,9 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
       // 3. UPLOAD PRO MINIO
       const imageUrl = await uploadImage(
         fileData.filename,
-        fileData.buffer, 
+        fileData.buffer,
         fileData.mimetype,
-        `ecd/${subfolder}`
+        `ecd/${subfolder}` // Agora salvará sempre em 'ecd/profiles' ou 'ecd/receipts'
       );
 
       return reply.send({ url: imageUrl });

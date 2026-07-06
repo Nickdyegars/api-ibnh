@@ -74,7 +74,7 @@ export class EcdController {
       const { name, yellowSlots, greenSlots } = request.body as any;
       if (!name) return reply.status(400).send({ error: 'Nome do líder é obrigatório' });
 
-      const result = await ecdService.createLeaderWithTokens(name, Number(yellowSlots), Number(greenSlots)) as any;
+      const result = await ecdService.createLeader(name, Number(yellowSlots), Number(greenSlots)) as any;
 
       // 📝 LOG: Geração de líder e seus links de inscrição
       AuditService.log(requester.sub, 'CREATE', 'ECD_LEADER', result?.id, { name, yellowSlots, greenSlots });
@@ -704,5 +704,55 @@ export class EcdController {
       return reply.status(500).send({ error: "Erro interno ao buscar o histórico." });
     }
   }
+  async generateBatchPdf(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { amountYellow = 0, amountGreen = 0, editionId } = request.body as any;
 
+      if (!editionId) {
+        return reply.status(400).send({ error: "É necessário informar o ID da edição atual." });
+      }
+
+      if (amountYellow === 0 && amountGreen === 0) {
+        return reply.status(400).send({ error: "Informe a quantidade de fichas." });
+      }
+
+      // Chama o serviço que cria no banco e desenha o PDF
+      const pdfDocument = await ecdService.generateTokensAndPdf(amountYellow, amountGreen, editionId);
+
+      // Configura os cabeçalhos para forçar o download no navegador
+      reply.type('application/pdf');
+      reply.header('Content-Disposition', `attachment; filename=fichas-ecd-${Date.now()}.pdf`);
+
+      return reply.send(pdfDocument);
+    } catch (error) {
+      console.error("Erro ao gerar PDF de lotes:", error);
+      return reply.status(500).send({ error: "Erro interno ao processar a geração de fichas." });
+    }
+  }
+
+  async activateToken(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const requester = request.user as any;
+      const { shortCode, leaderId } = request.body as { shortCode: string, leaderId: string };
+
+      if (!shortCode || !leaderId) {
+        return reply.status(400).send({ error: "O código da ficha e o ID do líder são obrigatórios." });
+      }
+
+      // Chama a regra de negócio que acabámos de criar no Service
+      const activated = await ecdService.activateVoucher(shortCode, leaderId);
+
+      // 📝 LOG: Auditoria de ativação de ficha física na secretaria
+      AuditService.log(requester.sub, 'ACTIVATE_VOUCHER', 'ECD_TOKEN', activated.id, { leaderId });
+
+      return reply.send({ 
+        success: true, 
+        message: `Ficha ${activated.tokenType} ativada e vinculada com sucesso!` 
+      });
+
+    } catch (error: any) {
+      console.error("Erro ao ativar ficha na secretaria:", error);
+      return reply.status(400).send({ error: error.message || "Erro interno ao ativar a ficha." });
+    }
+  }
 }

@@ -450,18 +450,21 @@ model EcdLeader {
 }
 
 model EcdToken {
-  // O próprio ID será o token único gerado por UUID e usado na URL
   id        String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tokenType String    @map("token_type") @db.VarChar(50) // "AMARELA" ou "VERDE"
+  shortCode String    @unique @map("short_code") @db.VarChar(10)
+  tokenType String    @map("token_type") @db.VarChar(50) 
   isUsed    Boolean   @default(false) @map("is_used")
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
 
+  // 👇 ADICIONE ESTAS DUAS LINHAS: Amarra a ficha à edição!
+  editionId String?     @map("edition_id") @db.Uuid
+  edition   EcdEdition? @relation(fields: [editionId], references: [id], onDelete: Cascade)
+
   // Relacionamento com o Líder
-  leaderId  String    @map("leader_id") @db.Uuid
-  leader    EcdLeader @relation(fields: [leaderId], references: [id], onDelete: Cascade)
+  leaderId  String?   @map("leader_id") @db.Uuid
+  leader    EcdLeader? @relation(fields: [leaderId], references: [id], onDelete: Cascade)
   
-  // Relacionamento 1:1 inverso com a Inscrição
   registration EcdRegistration?
 
   @@map("ecd_tokens")
@@ -481,6 +484,7 @@ model EcdEdition {
   workerPaymentLink      String? @map("worker_payment_link") @db.Text
   worker_leaders       EcdWorkerLeader[]
   leaders     EcdLeader[]
+  tokens EcdToken[]
 
   registrations EcdRegistration[] 
   worker_slots_config EcdEditionWorkerSlot[]

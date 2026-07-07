@@ -30,6 +30,7 @@ export const registerEcdSchema = z.object({
   lgpdConsentDate: z.string().optional(),
   lgpdTermsVersion: z.string().optional(),
   spiritualStatus: z.string().optional(),
+  inviteCode: z.string().min(1, "O Código do Líder é obrigatório"),
 });
 
 export const editionEcdSchema = z.object({

@@ -509,7 +509,7 @@ export class EcdController {
         where: { edition_id: id },
         select: {
           full_name: true,
-          phone: true, // 👈 ADICIONE ISTO AQUI
+          phone: true,
           area: { select: { name: true } },
           leader: { select: { name: true } },
           profile_photo_url: true,
@@ -524,7 +524,7 @@ export class EcdController {
           full_name: true,
           gender: true,
           age: true,
-          phone: true, // 👈 ADICIONE ISTO AQUI
+          phone: true,
           in_cell: true,
           cell_leader_name: true,
           invited_by: true,
@@ -554,7 +554,7 @@ export class EcdController {
 
       const workersSnapshot = approvedWorkers.map(w => ({
         full_name: w.full_name,
-        phone: w.phone || 'Sem número', // 👈 Salvando o telefone
+        phone: w.phone || 'Sem número',
         area_name: w.area?.name || 'Sem Área',
         leader_name: w.leader?.name || 'N/A'
       }));
@@ -562,7 +562,7 @@ export class EcdController {
       const attendeesSnapshot = activeAttendees.map(a => {
         let origin = 'Não informado';
 
-        // 👇 A Lógica robusta em cascata (Idêntica ao PDF)
+        // Lógica robusta em cascata
         if (a.cell_leader_name && a.cell_leader_name !== 'Origem Desconhecida') {
           origin = `Célula: ${a.cell_leader_name}`;
         } else if (a.leader?.name) {
@@ -575,7 +575,7 @@ export class EcdController {
           full_name: a.full_name,
           gender: a.gender,
           age: a.age,
-          phone: a.phone || 'Sem número', // 👈 Salvando o telefone
+          phone: a.phone || 'Sem número',
           origin: origin
         };
       });
@@ -587,20 +587,19 @@ export class EcdController {
         return {
           name: al.name,
           area_name: al.area?.name || 'Sem Área',
-          workers_count: countLiderados // 👈 Salvando a quantidade de voluntários!
+          workers_count: countLiderados
         };
       });
 
       const leadersSlotsSnapshot = cellLeaders.map(l => {
         // Lógica para descobrir o nome real do líder
-        let leaderName = l.name; // Tenta pegar o nome direto (Líder Externo)
+        let leaderName = l.name;
         if (l.cell) {
-          // Se for líder interno, junta o nome do líder da célula com o nome da célula
           leaderName = `${l.cell.leader} (${l.cell.name})`;
         }
 
         return {
-          name: leaderName || 'Líder Não Identificado', // Fallback seguro
+          name: leaderName || 'Líder Não Identificado',
           total_yellow: l.totalYellowSlots || 0,
           used_yellow: l.usedYellowSlots || 0,
           total_green: l.totalGreenSlots || 0,
@@ -625,7 +624,7 @@ export class EcdController {
 
         // A) Salva tudo no Histórico
         await tx.ecdEditionHistory.upsert({
-          where: { edition_id: id }, // Aqui o seu schema pede snake_case
+          where: { edition_id: id },
           create: {
             edition_id: id,
             edition_name: edition.name,
@@ -647,34 +646,37 @@ export class EcdController {
           }
         });
 
-        // 👇 B) Limpeza dos Links (Tokens) 👇
+        // B) Limpeza dos Links (Tokens)
         const editionLeaders = await tx.ecdLeader.findMany({
-          where: { editionId: id }, // 👈 Aqui o seu schema pede camelCase
+          where: { editionId: id },
           select: { id: true }
         });
         const leaderIds = editionLeaders.map(l => l.id);
 
         if (leaderIds.length > 0) {
-          // Destrói todos os links (tokens)
           await tx.ecdToken.deleteMany({
-            where: { leaderId: { in: leaderIds } } // 👈 camelCase
+            where: { leaderId: { in: leaderIds } }
           });
         }
 
         // C) Limpeza das Fichas e Registros
-        await tx.ecdRegistration.deleteMany({ where: { edition_id: id } }); // snake_case
-        await tx.ecdWorkerRegistration.deleteMany({ where: { edition_id: id } }); // snake_case
+        await tx.ecdRegistration.deleteMany({ where: { edition_id: id } });
+        await tx.ecdWorkerRegistration.deleteMany({ where: { edition_id: id } });
 
-        // 👇 D) Limpeza das Cotas dos Líderes 👇
-        await tx.ecdLeader.deleteMany({ where: { editionId: id } }); // 👈 camelCase
+        // D) Limpeza das Cotas dos Líderes
+        await tx.ecdLeader.deleteMany({ where: { editionId: id } });
         await tx.ecdWorkerLeader.deleteMany({ where: { edition_id: id } });
 
         // E) Desativa a Edição
         await tx.ecdEdition.update({ where: { id }, data: { is_active: false } });
+
+        // 👇 AQUI ESTÁ A CORREÇÃO DE TEMPO MÁXIMO 👇
+      }, {
+        maxWait: 10000, // 10 segundos de espera máxima para iniciar
+        timeout: 30000  // 30 segundos de limite para executar tudo
       });
 
       // 5. TRITURAÇÃO FÍSICA DOS ARQUIVOS NO MINIO (Assíncrono)
-      // Usamos o Promise.allSettled para garantir que, se uma foto der erro, as outras continuem sendo deletadas.
       if (filesToDelete.length > 0) {
         Promise.allSettled(filesToDelete.map(url => deleteImage(url)))
           .then(() => console.log(`[STORAGE] Limpeza concluída: ${filesToDelete.length} imagens enfileiradas para exclusão no MinIO.`))
@@ -692,6 +694,7 @@ export class EcdController {
       return reply.status(500).send({ error: "Erro interno ao processar encerramento da edição." });
     }
   }
+  
   async getEditionHistory(request: any, reply: any) {
     try {
       const history = await prisma.ecdEditionHistory.findMany({
@@ -730,29 +733,30 @@ export class EcdController {
     }
   }
 
-  async activateToken(request: FastifyRequest, reply: FastifyReply) {
+  async exportLeadersPdf(request: FastifyRequest, reply: FastifyReply) {
     try {
-      const requester = request.user as any;
-      const { shortCode, leaderId } = request.body as { shortCode: string, leaderId: string };
+      const { editionId } = request.query as { editionId: string };
+      if (!editionId) return reply.status(400).send({ error: "ID da edição é obrigatório." });
 
-      if (!shortCode || !leaderId) {
-        return reply.status(400).send({ error: "O código da ficha e o ID do líder são obrigatórios." });
-      }
+      const pdfDocument = await ecdService.generateLeadersCodesPdf(editionId);
 
-      // Chama a regra de negócio que acabámos de criar no Service
-      const activated = await ecdService.activateVoucher(shortCode, leaderId);
+      reply.type('application/pdf');
+      reply.header('Content-Disposition', `attachment; filename=codigos-lideres-${Date.now()}.pdf`);
+      return reply.send(pdfDocument);
+    } catch (error) {
+      return reply.status(500).send({ error: "Erro ao gerar PDF de códigos." });
+    }
+  }
 
-      // 📝 LOG: Auditoria de ativação de ficha física na secretaria
-      AuditService.log(requester.sub, 'ACTIVATE_VOUCHER', 'ECD_TOKEN', activated.id, { leaderId });
+  async validatePinPublic(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { pin, token } = request.body as { pin: string, token: string };
+      if (!pin || !token) return reply.status(400).send({ error: "PIN e Token são obrigatórios." });
 
-      return reply.send({ 
-        success: true, 
-        message: `Ficha ${activated.tokenType} ativada e vinculada com sucesso!` 
-      });
-
+      const result = await ecdService.validatePin(pin, token);
+      return reply.send(result);
     } catch (error: any) {
-      console.error("Erro ao ativar ficha na secretaria:", error);
-      return reply.status(400).send({ error: error.message || "Erro interno ao ativar a ficha." });
+      return reply.status(400).send({ error: error.message });
     }
   }
 }

@@ -8,6 +8,7 @@ export async function ecdRoutes(app: FastifyInstance) {
   // URL Final: /v1/ecd/public/register
   app.post('/public/register', (req, rep) => ecdController.register(req, rep));
   app.get('/public/validate-token/:token', (req, rep) => ecdController.validateToken(req as any, rep));
+  app.post('/public/validate-pin', (req, rep) => ecdController.validatePinPublic(req, rep));
 
   // === ROTAS PRIVADAS (Requer Login no Painel) ===
   app.register(async function privateRoutes(childApp) {
@@ -61,8 +62,6 @@ export async function ecdRoutes(app: FastifyInstance) {
     childApp.get('/history', (req, rep) => ecdController.getEditionHistory(req, rep));
 
     childApp.post('/tokens/generate-pdf', (req, rep) => ecdController.generateBatchPdf(req, rep));
-    
-    // URL Final: /v1/ecd/tokens/activate
-    childApp.post('/tokens/activate', (req, rep) => ecdController.activateToken(req, rep));
+    childApp.get('/tokens/export-codes', (req, rep) => ecdController.exportLeadersPdf(req, rep));
   });
 }

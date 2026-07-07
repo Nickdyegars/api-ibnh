@@ -432,6 +432,7 @@ model EcdLeader {
   name      String?  @db.VarChar(255) 
   cellId    String?  @map("cell_id") @db.Uuid
   cell      SiteCell? @relation(fields: [cellId], references: [id], onDelete: Cascade)
+  inviteCode        String   @unique @map("invite_code") @db.VarChar(10)
 
   editionId String   @map("edition_id") @db.Uuid
   edition   EcdEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)

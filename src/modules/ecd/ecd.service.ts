@@ -23,105 +23,83 @@ export class EcdService {
   async validateToken(tokenCode: string) {
     const tokenRecord = await prisma.ecdToken.findUnique({
       where: { id: tokenCode },
-      include: {
-        leader: {
-          include: {
-            cell: true,
-            edition: true
-          }
-        }
-      }
+      include: { edition: true }
     });
 
     if (!tokenRecord) throw new Error("TOKEN_NOT_FOUND");
     if (tokenRecord.isUsed) throw new Error("TOKEN_ALREADY_USED");
 
-    // 👇 Extraímos para uma variável fixa. O TS entende e blinda ela daqui para baixo!
-    const leader = tokenRecord.leader;
-    if (!leader) throw new Error("TOKEN_NOT_ACTIVATED");
-
+    // Retorna apenas a cor da ficha para o Front-end saber como pintar a tela
     return {
       isValid: true,
       tokenType: tokenRecord.tokenType,
-      leaderName: leader.cell
-        ? `${leader.cell.leader} (${leader.cell.name})`
-        : (leader.name ?? 'Sem Líder'),
-      leaderId: leader.id, // 👈 Usamos leader.id em vez de tokenRecord.leaderId
-      paymentLink: leader.edition?.encontristaPaymentLink ?? undefined // 👈 Mudado para undefined para bater com o seu Schema
+      paymentLink: tokenRecord.edition?.encontristaPaymentLink ?? undefined
     };
   }
 
-  async createRegistration(data: RegisterEcdType, files: any) {
-    const tokenRecord = await prisma.ecdToken.findUnique({
-      where: { id: data.token },
-      include: { leader: { include: { cell: true } } }
-    });
-
+  async createRegistration(data: any, files: any) {
+    // 1. Busca a Ficha e vê se é válida
+    const tokenRecord = await prisma.ecdToken.findUnique({ where: { id: data.token } });
     if (!tokenRecord) throw new Error("TOKEN_NOT_FOUND");
     if (tokenRecord.isUsed) throw new Error("TOKEN_ALREADY_USED");
 
-    // 👇 Mesma estratégia de blindagem do TypeScript aqui
-    const leader = tokenRecord.leader;
-    if (!leader) throw new Error("Ficha inválida! Este QR Code ainda não foi ativado pela secretaria.");
+    // 2. Busca o Líder pelo PIN que o usuário digitou
+    const leader = await prisma.ecdLeader.findUnique({
+      where: { inviteCode: data.inviteCode.toUpperCase() },
+      include: { cell: true }
+    });
 
-    if (leader.editionId) {
-      const edition = await prisma.ecdEdition.findUnique({
-        where: { id: leader.editionId }
-      });
+    if (!leader) throw new Error("Código de líder inválido. Verifique o PIN fornecido.");
+    if (leader.editionId !== tokenRecord.editionId) throw new Error("Este código de líder pertence a outra edição do evento.");
 
-      if (edition) {
-        const totalMaximoPermitido = (edition.yellow_slots || 0) + (edition.green_slots || 0);
+    // 3. Checa as Vagas do LÍDER (A trava de segurança que conversamos)
+    // const availableSlots = tokenRecord.tokenType === 'AMARELA'
+    //   ? leader.totalYellowSlots - leader.usedYellowSlots
+    //   : leader.totalGreenSlots - leader.usedGreenSlots;
 
-        const totalInscritosAtuais = await prisma.ecdRegistration.count({
-          where: {
-            leader: { editionId: edition.id },
-            status: { in: ['ATIVO', 'PENDENTE'] }
-          }
-        });
+    // if (availableSlots <= 0) {
+    //   throw new Error(`O líder/origem (${leader.inviteCode}) não possui mais vagas para fichas ${tokenRecord.tokenType}s.`);
+    // }
 
-        if (totalMaximoPermitido > 0 && totalInscritosAtuais >= totalMaximoPermitido) {
-          throw new Error(`Inscrições encerradas! O limite máximo de ${totalMaximoPermitido} vagas para este Encontro foi atingido.`);
-        }
-      }
-    }
-
+    // 4. Salva Imagens
     let profileUrl = null, receiptUrl = null;
     if (files.profilePhoto) profileUrl = await uploadImage(files.profilePhoto.filename, files.profilePhoto.buffer, files.profilePhoto.mimetype, 'ecd/profiles');
     if (files.receiptPhoto) receiptUrl = await uploadImage(files.receiptPhoto.filename, files.receiptPhoto.buffer, files.receiptPhoto.mimetype, 'ecd/receipts');
 
+    // 5. Salva Tudo em Cascata
     return await prisma.$transaction(async (tx) => {
+      // A) Cria Inscrição
       const registration = await tx.ecdRegistration.create({
         data: {
           full_name: data.fullName,
-          nickname: data.nickname ?? null, // 👈 Voltou para null
+          nickname: data.nickname ?? null,
           phone: data.phone,
           gender: data.gender,
           age: data.age,
           address: data.address,
           is_married: data.isMarried,
-          spouse_name: data.spouseName ?? null, // 👈 Voltou para null
+          spouse_name: data.spouseName ?? null,
           relative_going: data.relativeGoing,
-          relative_degree: data.relativeDegree ?? null, // 👈 Voltou para null
+          relative_degree: data.relativeDegree ?? null,
           has_illness: data.hasIllness,
-          illness_desc: data.illnessDesc ?? null, // 👈 Voltou para null
+          illness_desc: data.illnessDesc ?? null,
           takes_medication: data.takesMedication,
-          medication_desc: data.medicationDesc ?? null, // 👈 Voltou para null
+          medication_desc: data.medicationDesc ?? null,
           dietary_restriction: data.dietaryRestriction,
-          dietary_desc: data.dietaryDesc ?? null, // 👈 Voltou para null
-          shirt_size: data.shirtSize ?? null, // 👈 Voltou para null
+          dietary_desc: data.dietaryDesc ?? null,
+          shirt_size: data.shirtSize ?? null,
           emergency_contact: data.emergencyContact,
           emergency_phone: data.emergencyPhone,
           in_cell: data.inCell,
 
           cell_leader_name: leader.cell?.name ?? leader.name ?? 'Origem Desconhecida',
-          invited_by: data.invitedBy ?? null, // 👈 Voltou para null
+          invited_by: data.invitedBy ?? null,
           profile_photo_url: profileUrl,
           receipt_photo_url: receiptUrl,
-          spiritual_status: data.spiritualStatus ?? null, // 👈 Voltou para null
+          spiritual_status: data.spiritualStatus ?? null,
 
           status: 'PENDENTE',
           ficha_type: tokenRecord.tokenType,
-
           leader_id: leader.id,
           token_id: tokenRecord.id,
           edition_id: leader.editionId,
@@ -132,9 +110,17 @@ export class EcdService {
         }
       });
 
+      // B) Vincula a ficha ao líder e queima ela
       await tx.ecdToken.update({
         where: { id: tokenRecord.id },
-        data: { isUsed: true, usedAt: new Date() }
+        data: { isUsed: true, usedAt: new Date(), leaderId: leader.id }
+      });
+
+      // C) Desconta a Vaga do Líder (Pendente já gasta vaga)
+      const field = tokenRecord.tokenType === 'AMARELA' ? 'usedYellowSlots' : 'usedGreenSlots';
+      await tx.ecdLeader.update({
+        where: { id: leader.id },
+        data: { [field]: { increment: 1 } }
       });
 
       return registration;
@@ -172,6 +158,7 @@ export class EcdService {
       total_green_slots: l.totalGreenSlots,
       used_green_slots: l.usedGreenSlots,
       tokens: l.tokens,
+      inviteCode: l.inviteCode,
       // 👇 REPASSAMOS AS INSCRIÇÕES PARA O FRONTEND
       registrations: l.registrations
     }));
@@ -372,27 +359,28 @@ export class EcdService {
   // ==========================================
 
   async getEditions() {
-    return await prisma.ecdEdition.findMany({ orderBy: { created_at: 'desc' } });
+    const editions = await prisma.ecdEdition.findMany({ orderBy: { created_at: 'desc' } });
+
+    // 👇 NOVO: Conta quantas fichas físicas já foram geradas (impressas) para cada edição
+    const editionsWithCounts = await Promise.all(editions.map(async (ed) => {
+      const printedYellow = await prisma.ecdToken.count({ where: { editionId: ed.id, tokenType: 'AMARELA' } });
+      const printedGreen = await prisma.ecdToken.count({ where: { editionId: ed.id, tokenType: 'VERDE' } });
+
+      return {
+        ...ed,
+        printedYellow,
+        printedGreen
+      };
+    }));
+
+    return editionsWithCounts;
   }
 
   async createEdition(data: EditionEcdType) {
     return await prisma.$transaction(async (tx) => {
-      const edition = await tx.ecdEdition.create({
-        data: {
-          name: data.name,
-          yellow_slots: data.yellowSlots,
-          green_slots: data.greenSlots,
-          worker_slots: data.workerSlots,
-          encontristaPaymentLink: data.encontristaPaymentLink ?? null,
-          workerPaymentLink: data.workerPaymentLink ?? null,
-          is_active: true
-        }
-      });
+      const edition = await tx.ecdEdition.create({ data: { /* seus dados aqui, não mudei nada */ name: data.name, yellow_slots: data.yellowSlots, green_slots: data.greenSlots, worker_slots: data.workerSlots, encontristaPaymentLink: data.encontristaPaymentLink ?? null, workerPaymentLink: data.workerPaymentLink ?? null, is_active: true } });
 
-      const activeCells = await tx.siteCell.findMany({
-        where: { is_active: true },
-        select: { id: true }
-      });
+      const activeCells = await tx.siteCell.findMany({ where: { is_active: true }, select: { id: true } });
 
       if (activeCells.length > 0) {
         const leadersToInsert = activeCells.map(cell => ({
@@ -401,12 +389,11 @@ export class EcdService {
           totalYellowSlots: 0,
           usedYellowSlots: 0,
           totalGreenSlots: 0,
-          usedGreenSlots: 0
+          usedGreenSlots: 0,
+          inviteCode: generateShortCode(5).toUpperCase() // 👇 ADICIONADO AQUI
         }));
-
         await tx.ecdLeader.createMany({ data: leadersToInsert });
       }
-
       return edition;
     });
   }
@@ -486,13 +473,13 @@ export class EcdService {
 
     await this._checkQuotaAvailability(latestEdition.id, null, yellowSlots, greenSlots);
 
-    // 👇 Apenas cria o líder. Os tokens serão ativados via bip da secretaria.
     return await prisma.ecdLeader.create({
       data: {
         name,
         editionId: latestEdition.id,
         totalYellowSlots: yellowSlots,
-        totalGreenSlots: greenSlots
+        totalGreenSlots: greenSlots,
+        inviteCode: generateShortCode(5).toUpperCase() // 👇 ADICIONADO AQUI
       }
     });
   }
@@ -528,50 +515,47 @@ export class EcdService {
     }
   }
 
+  // ==========================================
+  // GERAÇÃO DE LOTE E PDF COM TRAVA DE EDIÇÃO
+  // ==========================================
   async generateTokensAndPdf(amountYellow: number, amountGreen: number, editionId: string) {
-    const tokensToCreate: {
-      id: string;
-      shortCode: string;
-      tokenType: string;
-      isUsed: boolean;
-      editionId?: string;
-    }[] = [];
 
-    // 1. Prepara os Lotes com UUIDs gerados aqui no Node
+    // 1. TRAVA DE SEGURANÇA E LIMITES
+    const edition = await prisma.ecdEdition.findUnique({ where: { id: editionId } });
+    if (!edition) throw new Error("Edição não encontrada.");
+
+    const alreadyYellow = await prisma.ecdToken.count({ where: { editionId, tokenType: 'AMARELA' } });
+    const alreadyGreen = await prisma.ecdToken.count({ where: { editionId, tokenType: 'VERDE' } });
+
+    if (alreadyYellow + amountYellow > edition.yellow_slots) {
+      throw new Error(`Limite excedido! A edição permite ${edition.yellow_slots} amarelas. Já imprimimos ${alreadyYellow}. Você só pode gerar mais ${edition.yellow_slots - alreadyYellow}.`);
+    }
+
+    if (alreadyGreen + amountGreen > edition.green_slots) {
+      throw new Error(`Limite excedido! A edição permite ${edition.green_slots} verdes. Já imprimimos ${alreadyGreen}. Você só pode gerar mais ${edition.green_slots - alreadyGreen}.`);
+    }
+
+    // 2. GERAÇÃO DOS TOKENS (USO ÚNICO)
+    const tokensToCreate: { id: string; shortCode: string; tokenType: string; isUsed: boolean; editionId?: string; }[] = [];
+
     for (let i = 0; i < amountYellow; i++) {
-      tokensToCreate.push({
-        id: crypto.randomUUID(),
-        shortCode: generateShortCode(5),
-        tokenType: 'AMARELA',
-        isUsed: false,
-        editionId: editionId // Amarra os tokens à edição atual!
-      });
+      tokensToCreate.push({ id: crypto.randomUUID(), shortCode: generateShortCode(5), tokenType: 'AMARELA', isUsed: false, editionId: editionId });
     }
 
     for (let i = 0; i < amountGreen; i++) {
-      tokensToCreate.push({
-        id: crypto.randomUUID(),
-        shortCode: generateShortCode(5),
-        tokenType: 'VERDE',
-        isUsed: false,
-        editionId: editionId
-      });
+      tokensToCreate.push({ id: crypto.randomUUID(), shortCode: generateShortCode(5), tokenType: 'VERDE', isUsed: false, editionId: editionId });
     }
 
-    // 2. Salva no banco de dados
-    await prisma.ecdToken.createMany({
-      data: tokensToCreate,
-      skipDuplicates: true
-    });
+    await prisma.ecdToken.createMany({ data: tokensToCreate, skipDuplicates: true });
 
-    // 3. Monta o PDF
+    // 3. DESENHO DO NOVO PDF (1 QR CODE + ESPAÇO PARA O PIN)
     const doc = new PDFDocument({ size: 'A4', margin: 30 });
     const rowHeight = 230;
     const startY = 40;
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
 
     for (let index = 0; index < tokensToCreate.length; index++) {
       const token = tokensToCreate[index];
-
       if (!token) continue;
 
       if (index > 0 && index % 3 === 0) doc.addPage();
@@ -579,91 +563,95 @@ export class EcdService {
       const currentY = startY + (index % 3) * rowHeight;
       const colorHex = token.tokenType === 'AMARELA' ? '#eab308' : '#16a34a';
 
-      // Design do Voucher
+      // Borda Externa da Ficha
       doc.rect(30, currentY, 535, 210).strokeColor('#cbd5e1').lineWidth(1).stroke();
-      doc.rect(30, currentY, 150, 25).fill(colorHex);
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10).text(`CANHOTO - ${token.tokenType}`, 35, currentY + 7);
 
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(22).text(token.shortCode, 45, currentY + 45);
-      doc.font('Helvetica').fontSize(8).fillColor('#64748b').text('CÓDIGO DE ATIVAÇÃO', 45, currentY + 70);
+      // Faixa Superior Colorida
+      doc.rect(30, currentY, 535, 35).fill(colorHex);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType}`, 45, currentY + 12);
 
-      // QR Code da Secretaria
-      const secretQrBuffer = await QRCode.toBuffer(token.shortCode, { margin: 1, width: 90 });
-      doc.image(secretQrBuffer, 60, currentY + 95, { width: 90 });
+      // Texto de Instruções (Lado Esquerdo)
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(12).text('COMO SE INSCREVER:', 45, currentY + 55);
+      doc.font('Helvetica').fontSize(10).fillColor('#334155')
+        .text('1. Aponte a câmera do celular para o QR Code ao lado.', 45, currentY + 75)
+        .text('2. Preencha o formulário e anexe o seu comprovante.', 45, currentY + 95)
+        .text('3. Digite o PIN do seu líder (anotado na caixa abaixo).', 45, currentY + 115);
 
-      // Linha Serrilhada
-      doc.moveTo(180, currentY).lineTo(180, currentY + 210).dash(4, { space: 4 }).strokeColor('#94a3b8').stroke();
-      doc.undash();
+      // Caixa para o Líder escrever o PIN a caneta
+      doc.rect(45, currentY + 145, 300, 50).fillAndStroke('#f8fafc', '#94a3b8');
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(10).text('CÓDIGO DO LÍDER (PIN):', 55, currentY + 155);
+      doc.fillColor('#cbd5e1').font('Helvetica-Bold').fontSize(14).text('ESCREVA O PIN AQUI', 55, currentY + 172);
 
-      // Ficha do Encontrista
-      doc.rect(180, currentY, 385, 25).fill(colorHex);
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11).text('ENCONTRO COM DEUS - INSCRIÇÃO', 195, currentY + 7);
-
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(12).text('Instruções:', 195, currentY + 45);
-      doc.font('Helvetica').fontSize(9).fillColor('#334155')
-        .text('1. Aponte a câmera do celular para o QR Code.', 195, currentY + 65)
-        .text('2. Preencha o formulário e anexe o comprovante.', 195, currentY + 80)
-        .text(`3. ID de Segurança: ${token.shortCode}`, 195, currentY + 100);
-
-      // QR Code Público
-      // 1. Ele tenta ler o link do arquivo .env. Se não achar, usa o localhost como segurança.
-      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
-
-      // 2. Monta o link dinâmico juntando a URL base com a tela de cadastro e o ID da ficha
+      // QR Code Único (Lado Direito)
       const publicUrl = `${baseUrl}/ecd/cadastro?token=${token.id}`;
+      const publicQrBuffer = await QRCode.toBuffer(publicUrl, { margin: 1, width: 140 });
 
-      // 3. Desenha o QR Code no PDF
-      const publicQrBuffer = await QRCode.toBuffer(publicUrl, { margin: 1, width: 120 });
-      doc.image(publicQrBuffer, 435, currentY + 45, { width: 120 });
-      doc.image(publicQrBuffer, 435, currentY + 45, { width: 120 });
+      doc.image(publicQrBuffer, 400, currentY + 45, { width: 140 });
+
+      // ID de Segurança (Rodapé do QR Code)
+      doc.font('Helvetica').fontSize(8).fillColor('#94a3b8').text(`ID: ${token.shortCode} | Link de uso único`, 400, currentY + 190, { align: 'center', width: 140 });
     }
 
     doc.end();
-    return doc; // Retorna o arquivo gerado para o Controller
+    return doc;
   }
 
-  async activateVoucher(shortCode: string, leaderId: string) {
-    // 1. Busca a ficha pelo código digitado/bipado
-    const token = await prisma.ecdToken.findUnique({
-      where: { shortCode: shortCode.toUpperCase() }
+  // ==========================================
+  // RELATÓRIO DE CÓDIGOS DE CONVITE (PIN)
+  // ==========================================
+  async generateLeadersCodesPdf(editionId: string) {
+    const edition = await prisma.ecdEdition.findUnique({ where: { id: editionId } });
+    if (!edition) throw new Error("Edição não encontrada.");
+
+    const leaders = await prisma.ecdLeader.findMany({
+      where: { editionId },
+      include: { cell: true },
+      orderBy: { name: 'asc' }
     });
 
-    if (!token) {
-      throw new Error("Código inválido! Ficha não encontrada no sistema.");
-    }
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
 
-    if (token.isUsed) {
-      throw new Error("Esta ficha já foi utilizada por um encontrista!");
-    }
+    // Cabeçalho
+    doc.fillColor('#1e3a8a').fontSize(18).font('Helvetica-Bold').text('CÓDIGOS DOS LÍDERES (PIN)', { align: 'center' });
+    doc.fillColor('#475569').fontSize(12).font('Helvetica').text(`Edição: ${edition.name}`, { align: 'center' });
+    doc.moveDown(2);
 
-    if (token.leaderId) {
-      throw new Error("Esta ficha já foi ativada e entregue para um líder anteriormente.");
-    }
+    doc.fontSize(10).text('Entregue estes códigos aos líderes. Os encontristas deverão digitar o código exato no site no momento da inscrição.', { align: 'center' });
+    doc.moveDown(2);
 
-    // 2. Verifica se o líder destino existe
+    // Tabela Simples
+    leaders.forEach(l => {
+      const name = l.cell ? `${l.cell.leader} (${l.cell.name})` : l.name;
+
+      doc.rect(40, doc.y, 515, 30).fill('#f8fafc').strokeColor('#cbd5e1').lineWidth(1).stroke();
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(11).text(name || 'Desconhecido', 50, doc.y + 10);
+      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(14).text(l.inviteCode, 450, doc.y - 12);
+
+      doc.moveDown(1.5);
+    });
+
+    doc.end();
+    return doc;
+  }
+
+  async validatePin(inviteCode: string, tokenId: string) {
+    const token = await prisma.ecdToken.findUnique({ where: { id: tokenId } });
+    if (!token) throw new Error("Ficha não encontrada no sistema.");
+    if (token.isUsed) throw new Error("Esta ficha já foi utilizada por outra pessoa.");
+
     const leader = await prisma.ecdLeader.findUnique({
-      where: { id: leaderId }
+      where: { inviteCode: inviteCode.toUpperCase() },
+      include: { cell: true }
     });
 
-    if (!leader) {
-      throw new Error("Líder não encontrado para vinculação.");
-    }
+    if (!leader) throw new Error("Código (PIN) inválido. Verifique se digitou corretamente.");
+    if (leader.editionId !== token.editionId) throw new Error("Este PIN pertence a outra edição do evento.");
 
-    // 3. Executa a vinculação e sobe a cota do líder na mesma transação
-    return await prisma.$transaction(async (tx) => {
-      const activatedToken = await tx.ecdToken.update({
-        where: { id: token.id },
-        data: { leaderId: leader.id }
-      });
+    // 👇 REMOVEMOS A CHECAGEM DE COTA AQUI 👇
 
-      const field = token.tokenType === 'AMARELA' ? 'totalYellowSlots' : 'totalGreenSlots';
-      await tx.ecdLeader.update({
-        where: { id: leader.id },
-        data: { [field]: { increment: 1 } }
-      });
-
-      return activatedToken;
-    });
+    return {
+      isValid: true,
+      leaderName: leader.cell?.name ?? leader.name
+    };
   }
-
 }

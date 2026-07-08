@@ -133,35 +133,45 @@ export class EcdService {
 
   async getLeaders() {
     const latestEdition = await prisma.ecdEdition.findFirst({
-      orderBy: { created_at: 'desc' }
+      orderBy: { created_at: 'desc' } // Certifique-se de usar o camelCase aqui também, se aplicável
     });
 
     if (!latestEdition) return [];
 
+    // 1. Busca os líderes
     const leaders = await prisma.ecdLeader.findMany({
       where: { editionId: latestEdition.id },
       include: {
-        cell: { select: { name: true, leader: true } },
-        tokens: true,
-        // 👇 INCLUÍMOS AS INSCRIÇÕES AQUI PARA SABER QUEM USOU O LINK
-        registrations: { select: { token_id: true, full_name: true, status: true } }
-      },
-      orderBy: { cell: { name: 'asc' } }
+        cell: { select: { leader: true } }
+      }
     });
 
-    return leaders.map(l => ({
-      id: l.id,
-      name: l.cell ? `${l.cell.leader} (${l.cell.name})` : (l.name ?? 'Sem Nome'),
-      isExternal: !l.cell,
-      total_yellow_slots: l.totalYellowSlots,
-      used_yellow_slots: l.usedYellowSlots,
-      total_green_slots: l.totalGreenSlots,
-      used_green_slots: l.usedGreenSlots,
-      tokens: l.tokens,
-      inviteCode: l.inviteCode,
-      // 👇 REPASSAMOS AS INSCRIÇÕES PARA O FRONTEND
-      registrations: l.registrations
-    }));
+    // 2. Busca TODAS as inscrições reais desta edição
+    const registrations = await prisma.ecdRegistration.findMany({
+      where: { edition_id: latestEdition.id },
+      select: { leader_id: true, status: true, ficha_type: true }
+    });
+
+    // 3. Monta o pacote de dados com a contagem exata
+    return leaders.map(l => {
+      // Filtra as inscrições que pertencem a este líder
+      const lRegs = registrations.filter(r => r.leader_id === l.id);
+
+      return {
+        id: l.id,
+        name: l.cell?.leader || l.name || 'Líder Não Identificado',
+        isExternal: !l.cell,
+        inviteCode: l.inviteCode,
+
+        // Contagem Amarela
+        yellow_pending: lRegs.filter(r => r.ficha_type === 'AMARELA' && r.status === 'PENDENTE').length,
+        yellow_approved: lRegs.filter(r => r.ficha_type === 'AMARELA' && r.status === 'ATIVO').length,
+
+        // Contagem Verde
+        green_pending: lRegs.filter(r => r.ficha_type === 'VERDE' && r.status === 'PENDENTE').length,
+        green_approved: lRegs.filter(r => r.ficha_type === 'VERDE' && r.status === 'ATIVO').length,
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async updateLeader(id: string, name: string, yellowSlots: number, greenSlots: number) {
@@ -249,39 +259,20 @@ export class EcdService {
   }
 
   async approveRegistration(registrationId: string, leaderId: string, fichaType: 'AMARELA' | 'VERDE') {
-    const leader = await prisma.ecdLeader.findUnique({
-      where: { id: leaderId },
-      include: { cell: true }
+    const registration = await prisma.ecdRegistration.findUnique({
+      where: { id: registrationId }
     });
 
-    if (!leader) throw new Error("Líder não encontrado.");
+    if (!registration) throw new Error("Ficha não encontrada.");
 
-    const availSlots = fichaType === 'AMARELA'
-      ? leader.totalYellowSlots - leader.usedYellowSlots
-      : leader.totalGreenSlots - leader.usedGreenSlots;
-
-    if (availSlots <= 0) {
-      // 👇 Protege contra célula nula usando o fallback
-      throw new Error(`A origem ${leader.cell?.name ?? leader.name ?? 'Desconhecida'} não possui mais vagas disponíveis para fichas ${fichaType}s.`);
-    }
-
-    return await prisma.$transaction(async (tx) => {
-      const updated = await tx.ecdRegistration.update({
-        where: { id: registrationId },
-        data: {
-          status: 'ATIVO',
-          leader_id: leaderId,
-          ficha_type: fichaType
-        }
-      });
-
-      const field = fichaType === 'AMARELA' ? 'usedYellowSlots' : 'usedGreenSlots';
-      await tx.ecdLeader.update({
-        where: { id: leaderId },
-        data: { [field]: { increment: 1 } }
-      });
-
-      return updated;
+    // Como a vaga já foi devidamente descontada e o líder já foi atrelado 
+    // no momento do cadastro (createRegistration), a aprovação agora apenas 
+    // altera o status da ficha de 'PENDENTE' para 'ATIVO', sem dupla contagem!
+    return await prisma.ecdRegistration.update({
+      where: { id: registrationId },
+      data: {
+        status: 'ATIVO'
+      }
     });
   }
 
@@ -317,13 +308,8 @@ export class EcdService {
     if (!newLeader) throw new Error("Líder de destino não encontrado.");
 
     const field = reg.ficha_type === 'AMARELA' ? 'usedYellowSlots' : 'usedGreenSlots';
-    const totalField = reg.ficha_type === 'AMARELA' ? 'totalYellowSlots' : 'totalGreenSlots';
 
-    const availSlots = newLeader[totalField] - newLeader[field];
-    if (availSlots <= 0) {
-      // 👇 Mesmo esquema de proteção aqui
-      throw new Error(`A origem ${newLeader.cell?.name ?? newLeader.name ?? 'Desconhecida'} não possui vagas disponíveis para fichas ${reg.ficha_type}s.`);
-    }
+    // 👇 REMOVIDA A VERIFICAÇÃO DE COTA INDIVIDUAL AQUI TAMBÉM 👇
 
     return await prisma.$transaction(async (tx) => {
       if (reg.status === 'ATIVO') {
@@ -343,7 +329,7 @@ export class EcdService {
       if (reg.token_id) {
         await tx.ecdToken.update({
           where: { id: reg.token_id },
-          data: { leaderId: newLeaderId } // Atualiza o token com o camelCase correto
+          data: { leaderId: newLeaderId }
         });
       }
 
@@ -378,22 +364,39 @@ export class EcdService {
 
   async createEdition(data: EditionEcdType) {
     return await prisma.$transaction(async (tx) => {
-      const edition = await tx.ecdEdition.create({ data: { /* seus dados aqui, não mudei nada */ name: data.name, yellow_slots: data.yellowSlots, green_slots: data.greenSlots, worker_slots: data.workerSlots, encontristaPaymentLink: data.encontristaPaymentLink ?? null, workerPaymentLink: data.workerPaymentLink ?? null, is_active: true } });
+      const edition = await tx.ecdEdition.create({
+        data: {
+          name: data.name,
+          yellow_slots: data.yellowSlots,
+          green_slots: data.greenSlots,
+          worker_slots: data.workerSlots,
+          encontristaPaymentLink: data.encontristaPaymentLink ?? null,
+          workerPaymentLink: data.workerPaymentLink ?? null,
+          is_active: true
+        }
+      });
 
-      const activeCells = await tx.siteCell.findMany({ where: { is_active: true }, select: { id: true } });
+      // 👇 1. Agora buscamos o ID e o NOME DO LÍDER da célula
+      const activeCells = await tx.siteCell.findMany({
+        // where: { is_active: true },
+        select: { id: true, leader: true }
+      });
 
       if (activeCells.length > 0) {
         const leadersToInsert = activeCells.map(cell => ({
           editionId: edition.id,
           cellId: cell.id,
+          name: cell.leader, // 👈 2. Salva APENAS o nome do líder diretamente no banco!
           totalYellowSlots: 0,
           usedYellowSlots: 0,
           totalGreenSlots: 0,
           usedGreenSlots: 0,
-          inviteCode: generateShortCode(5).toUpperCase() // 👇 ADICIONADO AQUI
+          inviteCode: generateShortCode(5).toUpperCase()
         }));
+
         await tx.ecdLeader.createMany({ data: leadersToInsert });
       }
+
       return edition;
     });
   }
@@ -554,6 +557,10 @@ export class EcdService {
     const startY = 40;
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
 
+    // Variáveis para controlar a numeração sequencial das fichas
+    let currentYellowNumber = alreadyYellow;
+    let currentGreenNumber = alreadyGreen;
+
     for (let index = 0; index < tokensToCreate.length; index++) {
       const token = tokensToCreate[index];
       if (!token) continue;
@@ -563,18 +570,28 @@ export class EcdService {
       const currentY = startY + (index % 3) * rowHeight;
       const colorHex = token.tokenType === 'AMARELA' ? '#eab308' : '#16a34a';
 
+      // Define o número sequencial para esta ficha específica
+      let seqNumber = 0;
+      if (token.tokenType === 'AMARELA') {
+        currentYellowNumber++;
+        seqNumber = currentYellowNumber;
+      } else {
+        currentGreenNumber++;
+        seqNumber = currentGreenNumber;
+      }
+
       // Borda Externa da Ficha
       doc.rect(30, currentY, 535, 210).strokeColor('#cbd5e1').lineWidth(1).stroke();
 
-      // Faixa Superior Colorida
+      // Faixa Superior Colorida com o NÚMERO SEQUENCIAL
       doc.rect(30, currentY, 535, 35).fill(colorHex);
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType}`, 45, currentY + 12);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType} Nº ${seqNumber}`, 45, currentY + 12);
 
       // Texto de Instruções (Lado Esquerdo)
       doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(12).text('COMO SE INSCREVER:', 45, currentY + 55);
       doc.font('Helvetica').fontSize(10).fillColor('#334155')
         .text('1. Aponte a câmera do celular para o QR Code ao lado.', 45, currentY + 75)
-        .text('2. Preencha o formulário e anexe o seu comprovante.', 45, currentY + 95)
+        .text('2. Preencha o formulário.', 45, currentY + 95)
         .text('3. Digite o PIN do seu líder (anotado na caixa abaixo).', 45, currentY + 115);
 
       // Caixa para o Líder escrever o PIN a caneta
@@ -600,34 +617,70 @@ export class EcdService {
   // RELATÓRIO DE CÓDIGOS DE CONVITE (PIN)
   // ==========================================
   async generateLeadersCodesPdf(editionId: string) {
-    const edition = await prisma.ecdEdition.findUnique({ where: { id: editionId } });
-    if (!edition) throw new Error("Edição não encontrada.");
-
     const leaders = await prisma.ecdLeader.findMany({
       where: { editionId },
       include: { cell: true },
-      orderBy: { name: 'asc' }
+      orderBy: { name: 'asc' } // Se o seu campo for 'name'
     });
+
+    if (leaders.length === 0) {
+      throw new Error("Nenhum líder encontrado para esta edição.");
+    }
 
     const doc = new PDFDocument({ size: 'A4', margin: 40 });
 
-    // Cabeçalho
-    doc.fillColor('#1e3a8a').fontSize(18).font('Helvetica-Bold').text('CÓDIGOS DOS LÍDERES (PIN)', { align: 'center' });
-    doc.fillColor('#475569').fontSize(12).font('Helvetica').text(`Edição: ${edition.name}`, { align: 'center' });
+    // Cabeçalho do Relatório
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(18).text('RELATÓRIO DE CÓDIGOS (PIN) - ECD', { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#64748b').text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, { align: 'center' });
     doc.moveDown(2);
 
-    doc.fontSize(10).text('Entregue estes códigos aos líderes. Os encontristas deverão digitar o código exato no site no momento da inscrição.', { align: 'center' });
-    doc.moveDown(2);
+    // Linha de Cabeçalho da Tabela
+    let currentY = doc.y;
+    doc.rect(40, currentY, 515, 24).fill('#334155');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10)
+      .text('LÍDER / ORIGEM', 50, currentY + 7, { width: 180 })
+      .text('CÓDIGO (PIN)', 240, currentY + 7, { width: 90, align: 'center' })
+      .text('FICHAS ENTREGUES', 340, currentY + 7, { width: 200, align: 'center' });
 
-    // Tabela Simples
-    leaders.forEach(l => {
-      const name = l.cell ? `${l.cell.leader} (${l.cell.name})` : l.name;
+    doc.moveDown(0.8);
 
-      doc.rect(40, doc.y, 515, 30).fill('#f8fafc').strokeColor('#cbd5e1').lineWidth(1).stroke();
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(11).text(name || 'Desconhecido', 50, doc.y + 10);
-      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(14).text(l.inviteCode, 450, doc.y - 12);
+    // Listagem dos Líderes
+    leaders.forEach((leader) => {
+      // Se estourar a página, cria uma nova e redesenha o topo
+      if (doc.y > 720) {
+        doc.addPage();
+        currentY = doc.y;
+        doc.rect(40, currentY, 515, 24).fill('#334155');
+        doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10)
+          .text('LÍDER / ORIGEM', 50, currentY + 7, { width: 180 })
+          .text('CÓDIGO (PIN)', 240, currentY + 7, { width: 90, align: 'center' })
+          .text('FICHAS ENTREGUES', 340, currentY + 7, { width: 200, align: 'center' });
+        doc.moveDown(0.8);
+      }
 
-      doc.moveDown(1.5);
+      const rowY = doc.y;
+      const displayName = leader.cell?.leader || leader.name || 'Líder Não Identificado';
+
+      // Nome do Líder
+      doc.fillColor('#334155').font('Helvetica').fontSize(10).text(displayName, 50, rowY + 8, { width: 180 });
+
+      // Caixa de Destaque do PIN
+      doc.rect(240, rowY + 3, 90, 20).fillAndStroke('#f1f5f9', '#cbd5e1');
+      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(11).text(leader.inviteCode || 'N/A', 240, rowY + 8, { width: 90, align: 'center' });
+
+      // 👇 AS CAIXAS EM BRANCO PARA ANOTAÇÃO A MÃO 👇
+      // Caixa Amarela
+      doc.rect(345, rowY + 3, 90, 20).strokeColor('#fef08a').lineWidth(1).stroke();
+      doc.fillColor('#a16207').font('Helvetica-Bold').fontSize(9).text('AM: _______', 355, rowY + 9);
+
+      // Caixa Verde
+      doc.rect(445, rowY + 3, 90, 20).strokeColor('#bbf7d0').lineWidth(1).stroke();
+      doc.fillColor('#15803d').font('Helvetica-Bold').fontSize(9).text('VD: _______', 455, rowY + 9);
+
+      // Linha sutil divisória de registro
+      doc.moveTo(40, rowY + 28).lineTo(555, rowY + 28).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
+
+      doc.y = rowY + 32; // Avança o cursor para a próxima linha
     });
 
     doc.end();
@@ -651,7 +704,324 @@ export class EcdService {
 
     return {
       isValid: true,
-      leaderName: leader.cell?.name ?? leader.name
+      leaderName: leader.cell?.leader ?? leader.name
     };
+  }
+
+  // ==========================================
+  // REIMPRESSÃO DE FICHAS NÃO UTILIZADAS
+  // ==========================================
+  async reprintTokensPdf(editionId: string) {
+    // 1. Busca TODAS as fichas da edição em ordem de criação para descobrirmos o número original
+    const allTokens = await prisma.ecdToken.findMany({
+      where: { editionId: editionId },
+      orderBy: [
+        { createdAt: 'asc' }, // Primeiro organiza por tempo
+        { id: 'asc' }         // 👈 O DESEMPATE: Se o tempo for igual, organiza por ID (Ordem alfabética do código)
+      ]
+    });
+
+    if (allTokens.length === 0) {
+      throw new Error("Não existem fichas geradas para esta edição.");
+    }
+
+    // 2. Filtra apenas as que não foram usadas, mas já "carimbadas" com o número original delas
+    const tokensToPrint: any[] = [];
+    let countYellow = 0;
+    let countGreen = 0;
+
+    for (const token of allTokens) {
+      let originalNumber = 0;
+
+      // Conta todas as fichas (usadas ou não) para manter a sequência matemática perfeita
+      if (token.tokenType === 'AMARELA') {
+        countYellow++;
+        originalNumber = countYellow;
+      } else if (token.tokenType === 'VERDE') {
+        countGreen++;
+        originalNumber = countGreen;
+      }
+
+      // Se a ficha AINDA NÃO foi usada, vai para a fila de impressão com o seu número!
+      if (token.isUsed === false) {
+        tokensToPrint.push({ ...token, originalNumber });
+      }
+    }
+
+    if (tokensToPrint.length === 0) {
+      throw new Error("Todas as fichas impressas desta edição já foram utilizadas!");
+    }
+
+    // Ordena para imprimir primeiro as Amarelas, depois as Verdes
+    tokensToPrint.sort((a, b) => a.tokenType.localeCompare(b.tokenType));
+
+    // 3. DESENHO DO PDF
+    const doc = new PDFDocument({ size: 'A4', margin: 30 });
+    const rowHeight = 230;
+    const startY = 40;
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
+
+    for (let index = 0; index < tokensToPrint.length; index++) {
+      const token = tokensToPrint[index];
+      if (!token) continue;
+
+      if (index > 0 && index % 3 === 0) doc.addPage();
+
+      const currentY = startY + (index % 3) * rowHeight;
+      const colorHex = token.tokenType === 'AMARELA' ? '#eab308' : '#16a34a';
+
+      // Borda Externa
+      doc.rect(30, currentY, 535, 210).strokeColor('#cbd5e1').lineWidth(1).stroke();
+
+      // 👇 MÁGICA AQUI: Faixa Superior Colorida com o NÚMERO ORIGINAL 👇
+      doc.rect(30, currentY, 535, 35).fill(colorHex);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType} Nº ${token.originalNumber} (REIMPRESSÃO)`, 45, currentY + 12);
+
+      // Instruções
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(12).text('COMO SE INSCREVER:', 45, currentY + 55);
+      doc.font('Helvetica').fontSize(10).fillColor('#334155')
+        .text('1. Aponte a câmera do celular para o QR Code ao lado.', 45, currentY + 75)
+        .text('2. Preencha o formulário.', 45, currentY + 95)
+        .text('3. Digite o PIN do seu líder (anotado na caixa abaixo).', 45, currentY + 115);
+
+      // Caixa do PIN
+      doc.rect(45, currentY + 145, 300, 50).fillAndStroke('#f8fafc', '#94a3b8');
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(10).text('CÓDIGO DO LÍDER (PIN):', 55, currentY + 155);
+      doc.fillColor('#cbd5e1').font('Helvetica-Bold').fontSize(14).text('ESCREVA O PIN AQUI', 55, currentY + 172);
+
+      // QR Code
+      const publicUrl = `${baseUrl}/ecd/cadastro?token=${token.id}`;
+      const publicQrBuffer = await QRCode.toBuffer(publicUrl, { margin: 1, width: 140 });
+      doc.image(publicQrBuffer, 400, currentY + 45, { width: 140 });
+
+      // 👇 MÁGICA AQUI: Transforma a área exata da imagem do QR Code num link clicável 👇
+      doc.link(400, currentY + 45, 140, 140, publicUrl);
+
+      // ID (Aproveitei para mudar o texto e avisar a pessoa que ela pode clicar)
+      doc.font('Helvetica').fontSize(8).fillColor('#94a3b8').text(`ID: ${token.shortCode} | Escaneie ou Clique`, 400, currentY + 190, { align: 'center', width: 140 });
+    }
+
+    doc.end();
+    return doc;
+  }
+
+  // ==========================================
+  // GERAÇÃO DE PDF COMPLETO (HISTÓRICO)
+  // ==========================================
+  async generateHistoryPdf(editionId: string) {
+    const historyRecord = await prisma.ecdEditionHistory.findFirst({
+      where: { edition_id: editionId }
+    });
+
+    if (!historyRecord) {
+      throw new Error("Nenhum registro de histórico encontrado para esta edição.");
+    }
+
+    const parseData = (data: any) => {
+      if (!data) return [];
+      return typeof data === 'string' ? JSON.parse(data) : data;
+    };
+
+    const encontristas: any[] = parseData(historyRecord.attendees_data);
+    const areaLeaders: any[] = parseData(historyRecord.area_leaders_data);
+    const workers: any[] = parseData(historyRecord.workers_data);
+    const cotas: any[] = parseData(historyRecord.leaders_slots_data);
+
+    encontristas.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+    areaLeaders.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    workers.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+    cotas.sort((a, b) => {
+      const engA = (a.used_yellow || 0) + (a.used_green || 0);
+      const engB = (b.used_yellow || 0) + (b.used_green || 0);
+      return engB !== engA ? engB - engA : (a.name || '').localeCompare(b.name || '');
+    });
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+    // CABEÇALHO GERAL
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(18).text(`RELATÓRIO COMPLETO: ${historyRecord.edition_name.toUpperCase()}`, 40, doc.y, { align: 'center', width: 515 });
+    doc.fontSize(10).font('Helvetica').fillColor('#64748b').text(`Data de Arquivamento: ${new Date(historyRecord.created_at).toLocaleString('pt-BR')}`, 40, doc.y, { align: 'center', width: 515 });
+    doc.moveDown(1.5);
+
+    const startY = doc.y;
+    doc.rect(40, startY, 515, 40).fill('#f8fafc').stroke('#cbd5e1').lineWidth(0.5).stroke();
+    doc.fillColor('#334155').font('Helvetica-Bold').fontSize(10)
+      .text(`Total de Encontristas: ${encontristas.length}`, 60, startY + 15)
+      .text(`Total da Equipe: ${(areaLeaders.length + workers.length)}`, 240, startY + 15)
+      .text(`Líderes Engajados: ${cotas.length}`, 410, startY + 15);
+
+    doc.y = startY + 60;
+
+    const checkPageBreak = (neededHeight: number = 40) => {
+      if (doc.y + neededHeight > 780) {
+        doc.addPage();
+        return true;
+      }
+      return false;
+    };
+
+    // ==========================================
+    // SESSÃO 1: ENCONTRISTAS
+    // ==========================================
+    // 👇 CORRIGIDO AQUI (Adicionado 40, doc.y) 👇
+    doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(12).text('1. LISTA DE ENCONTRISTAS', 40, doc.y);
+    doc.moveDown(0.5);
+
+    const drawEncontristasHeader = () => {
+      const top = doc.y;
+      doc.rect(40, top, 515, 20).fill('#334155');
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
+        .text('NOME COMPLETO', 45, top + 6, { width: 145 })
+        .text('ORIGEM / CÉLULA', 195, top + 6, { width: 120 })
+        .text('CONTATO', 320, top + 6, { width: 80 })
+        .text('PERFIL', 405, top + 6, { width: 80 })
+        .text('FICHA', 490, top + 6, { width: 60 });
+      doc.y = top + 24;
+    };
+
+    if (encontristas.length === 0) {
+      doc.font('Helvetica-Oblique').fontSize(9).fillColor('#94a3b8').text('Nenhum encontrista registrado.', 40, doc.y);
+    } else {
+      drawEncontristasHeader();
+      encontristas.forEach((e) => {
+        if (checkPageBreak(25)) drawEncontristasHeader();
+
+        const rowY = doc.y;
+        doc.fillColor('#334155').font('Helvetica').fontSize(8)
+          .text(e.full_name || '-', 45, rowY, { width: 145, ellipsis: true })
+          .text(e.origin || '-', 195, rowY, { width: 120, ellipsis: true })
+          .text(e.phone || '-', 320, rowY, { width: 80 })
+          .text(`${e.age || '-'}a | ${e.gender || '-'}`, 405, rowY, { width: 80 });
+
+        const fichaType = (e.ficha_type || e.fichaType || '').toUpperCase();
+        doc.fillColor(fichaType === 'AMARELA' ? '#a16207' : '#15803d').font('Helvetica-Bold')
+          .text(fichaType || '-', 490, rowY, { width: 60 });
+
+        doc.moveTo(40, rowY + 12).lineTo(555, rowY + 12).strokeColor('#f1f5f9').lineWidth(0.5).stroke();
+        doc.y = rowY + 16;
+      });
+    }
+    doc.moveDown(1.5);
+
+    // ==========================================
+    // SESSÃO 2: EQUIPE DE TRABALHO
+    // ==========================================
+    checkPageBreak(100);
+    // 👇 CORRIGIDO AQUI (Adicionado 40, doc.y) 👇
+    doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(12).text('2. EQUIPE DE TRABALHO', 40, doc.y);
+    doc.moveDown(0.5);
+
+    // 👇 CORRIGIDO AQUI (Adicionado 40, doc.y) 👇
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(9).text('COORDENADORES / LÍDERES DE ÁREA', 40, doc.y);
+    doc.moveDown(0.3);
+    if (areaLeaders.length === 0) {
+      doc.font('Helvetica-Oblique').fontSize(8).fillColor('#94a3b8').text('Nenhum coordenador registrado.', 40, doc.y);
+    } else {
+      const cTop = doc.y;
+      doc.rect(40, cTop, 515, 18).fill('#e2e8f0');
+      doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8)
+        .text('NOME DO COORDENADOR', 45, cTop + 5, { width: 200 })
+        .text('ÁREA DE ATUAÇÃO', 250, cTop + 5, { width: 150 })
+        .text('VOLUNTÁRIOS SOB GESTÃO', 410, cTop + 5, { width: 140 });
+      doc.y = cTop + 22;
+
+      areaLeaders.forEach((l) => {
+        if (checkPageBreak(20)) { /* header */ }
+        const rowY = doc.y;
+        doc.fillColor('#334155').font('Helvetica').fontSize(8)
+          .text(l.name || '-', 45, rowY, { width: 200, ellipsis: true })
+          .text(l.area_name || '-', 250, rowY, { width: 150, ellipsis: true })
+          .text(`${l.workers_count || 0} voluntário(s)`, 410, rowY, { width: 140 });
+        doc.y = rowY + 14;
+      });
+    }
+    doc.moveDown(1);
+
+    checkPageBreak(60);
+    // 👇 CORRIGIDO AQUI (Adicionado 40, doc.y) 👇
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(9).text('VOLUNTÁRIOS DA EQUIPE', 40, doc.y);
+    doc.moveDown(0.3);
+
+    const drawWorkersHeader = () => {
+      const wTop = doc.y;
+      doc.rect(40, wTop, 515, 18).fill('#f1f5f9');
+      doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8)
+        .text('NOME DO VOLUNTÁRIO', 45, wTop + 5, { width: 160 })
+        .text('LÍDER DIRETO', 210, wTop + 5, { width: 130 })
+        .text('CONTATO', 350, wTop + 5, { width: 90 })
+        .text('ÁREA', 445, wTop + 5, { width: 100 });
+      doc.y = wTop + 22;
+    };
+
+    if (workers.length === 0) {
+      doc.font('Helvetica-Oblique').fontSize(8).fillColor('#94a3b8').text('Nenhum voluntário registrado.', 40, doc.y);
+    } else {
+      drawWorkersHeader();
+      workers.forEach((w) => {
+        if (checkPageBreak(20)) drawWorkersHeader();
+        const rowY = doc.y;
+        doc.fillColor('#334155').font('Helvetica').fontSize(8)
+          .text(w.full_name || '-', 45, rowY, { width: 160, ellipsis: true })
+          .text(w.leader_name || '-', 210, rowY, { width: 130, ellipsis: true })
+          .text(w.phone || '-', 350, rowY, { width: 90 })
+          .text(w.area_name || '-', 445, rowY, { width: 100, ellipsis: true });
+
+        doc.moveTo(40, rowY + 12).lineTo(555, rowY + 12).strokeColor('#f8fafc').lineWidth(0.5).stroke();
+        doc.y = rowY + 16;
+      });
+    }
+    doc.moveDown(1.5);
+
+    // ==========================================
+    // SESSÃO 3: DESEMPENHO DE COTAS
+    // ==========================================
+    checkPageBreak(100);
+    // 👇 CORRIGIDO AQUI (Adicionado 40, doc.y) 👇
+    doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(12).text('3. DESEMPENHO E ENGAJAMENTO DE COTAS', 40, doc.y);
+    doc.moveDown(0.5);
+
+    const drawCotasHeader = () => {
+      const top = doc.y;
+      doc.rect(40, top, 515, 20).fill('#334155');
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
+        .text('LÍDER / ORIGEM', 45, top + 6, { width: 175 })
+        .text('FORNECIDAS', 225, top + 6, { width: 70, align: 'center' })
+        .text('AMARELAS USADAS', 300, top + 6, { width: 100, align: 'center' })
+        .text('VERDES USADAS', 405, top + 6, { width: 85, align: 'center' })
+        .text('APROV. (%)', 495, top + 6, { width: 55, align: 'center' });
+      doc.y = top + 24;
+    };
+
+    if (cotas.length === 0) {
+      doc.font('Helvetica-Oblique').fontSize(9).fillColor('#94a3b8').text('Nenhum dado de cota registrado.', 40, doc.y);
+    } else {
+      drawCotasHeader();
+      cotas.forEach((c) => {
+        if (checkPageBreak(25)) drawCotasHeader();
+
+        const rowY = doc.y;
+        const totalFornecido = (c.total_yellow || 0) + (c.total_green || 0);
+        const totalUsado = (c.used_yellow || 0) + (c.used_green || 0);
+        const aproveitamento = totalFornecido > 0 ? Math.round((totalUsado / totalFornecido) * 100) : 0;
+
+        doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8)
+          .text(c.name || '-', 45, rowY, { width: 175, ellipsis: true });
+
+        doc.font('Helvetica').fillColor('#64748b')
+          .text(totalFornecido.toString(), 225, rowY, { width: 70, align: 'center' });
+
+        doc.fillColor('#a16207').text(`${c.used_yellow || 0} / ${c.total_yellow || 0}`, 300, rowY, { width: 100, align: 'center' });
+        doc.fillColor('#15803d').text(`${c.used_green || 0} / ${c.total_green || 0}`, 405, rowY, { width: 85, align: 'center' });
+
+        doc.fillColor(aproveitamento === 100 ? '#10b981' : aproveitamento > 50 ? '#3b82f6' : '#f59e0b').font('Helvetica-Bold')
+          .text(`${aproveitamento}%`, 495, rowY, { width: 55, align: 'center' });
+
+        doc.moveTo(40, rowY + 12).lineTo(555, rowY + 12).strokeColor('#f1f5f9').lineWidth(0.5).stroke();
+        doc.y = rowY + 16;
+      });
+    }
+
+    doc.end();
+    return doc;
   }
 }

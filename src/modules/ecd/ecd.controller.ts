@@ -647,17 +647,9 @@ export class EcdController {
         });
 
         // B) Limpeza dos Links (Tokens)
-        const editionLeaders = await tx.ecdLeader.findMany({
-          where: { editionId: id },
-          select: { id: true }
+        await tx.ecdToken.deleteMany({
+          where: { editionId: id } // 👈 Muito mais limpo e direto!
         });
-        const leaderIds = editionLeaders.map(l => l.id);
-
-        if (leaderIds.length > 0) {
-          await tx.ecdToken.deleteMany({
-            where: { leaderId: { in: leaderIds } }
-          });
-        }
 
         // C) Limpeza das Fichas e Registros
         await tx.ecdRegistration.deleteMany({ where: { edition_id: id } });
@@ -694,7 +686,7 @@ export class EcdController {
       return reply.status(500).send({ error: "Erro interno ao processar encerramento da edição." });
     }
   }
-  
+
   async getEditionHistory(request: any, reply: any) {
     try {
       const history = await prisma.ecdEditionHistory.findMany({
@@ -757,6 +749,38 @@ export class EcdController {
       return reply.send(result);
     } catch (error: any) {
       return reply.status(400).send({ error: error.message });
+    }
+  }
+
+  async reprintBatchPdf(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { editionId } = request.query as { editionId: string };
+      if (!editionId) return reply.status(400).send({ error: "O ID da edição é obrigatório." });
+
+      const pdfDocument = await ecdService.reprintTokensPdf(editionId);
+
+      reply.type('application/pdf');
+      reply.header('Content-Disposition', `attachment; filename=fichas-reimpressas-${Date.now()}.pdf`);
+      return reply.send(pdfDocument);
+    } catch (error: any) {
+      console.error("Erro na reimpressão:", error);
+      return reply.status(400).send({ error: error.message || "Erro ao reimprimir fichas." });
+    }
+  }
+
+  async exportHistoryPdf(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { editionId } = request.query as { editionId: string };
+      if (!editionId) return reply.status(400).send({ error: "O ID da edição é obrigatório." });
+
+      const pdfDocument = await ecdService.generateHistoryPdf(editionId);
+
+      reply.type('application/pdf');
+      reply.header('Content-Disposition', `attachment; filename=historico-ecd-${editionId}.pdf`);
+      return reply.send(pdfDocument);
+    } catch (error: any) {
+      console.error("Erro ao exportar histórico:", error);
+      return reply.status(400).send({ error: error.message || "Erro ao gerar PDF do histórico." });
     }
   }
 }

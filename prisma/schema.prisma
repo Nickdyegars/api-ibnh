@@ -473,26 +473,33 @@ model EcdToken {
 }
 
 model EcdEdition {
-  id            String   @id @default(uuid()) @db.Uuid
-  name          String   @unique 
-  yellow_slots  Int      @default(0)
-  green_slots   Int      @default(0)
-  worker_slots  Int      @default(0)
-  is_active     Boolean  @default(false)
-  created_at    DateTime @default(now()) @db.Timestamptz(3)
-  public_token String?  @unique @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  encontristaPaymentLink String? @map("encontrista_payment_link") @db.Text
-  workerPaymentLink      String? @map("worker_payment_link") @db.Text
-  worker_leaders       EcdWorkerLeader[]
-  leaders     EcdLeader[]
-  tokens EcdToken[]
+  id                     String    @id @default(uuid()) @db.Uuid
+  name                   String    @unique 
+  yellow_slots           Int       @default(0)
+  green_slots            Int       @default(0)
+  worker_slots           Int       @default(0)
+  is_active              Boolean   @default(false)
+  created_at             DateTime  @default(now()) @db.Timestamptz(3)
+  
+  public_token           String?   @unique @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  encontristaPaymentLink String?   @map("encontrista_payment_link") @db.Text
+  workerPaymentLink      String?   @map("worker_payment_link") @db.Text
 
-  registrations EcdRegistration[] 
-  worker_slots_config EcdEditionWorkerSlot[]
-  worker_registrations EcdWorkerRegistration[]
+  // 👇 NOVOS CAMPOS DE VALORES ADICIONADOS AQUI 👇
+  priceTotal             Float?    @map("price_total") @default(100.00)
+  priceSignal            Float?    @map("price_signal") @default(50.00)
+  startDate              DateTime? @map("start_date")
+  endDate                DateTime? @map("end_date")
+  
+  worker_leaders         EcdWorkerLeader[]
+  leaders                EcdLeader[]
+  tokens                 EcdToken[]
+  registrations          EcdRegistration[] 
+  worker_slots_config    EcdEditionWorkerSlot[]
+  worker_registrations   EcdWorkerRegistration[]
 
   @@map("ecd_editions")
-  @@schema("app") // Corrigido para "app"
+  @@schema("app")
 }
 
 model EcdRegistration {
@@ -539,6 +546,8 @@ model EcdRegistration {
   leader              EcdLeader? @relation(fields: [leader_id], references: [id])
   token_id            String?  @unique @db.Uuid
   token               EcdToken? @relation(fields: [token_id], references: [id])
+  paymentType   String?   @map("payment_type")
+  receipt_final_photo_url String?   @map("receipt_final_photo_url")
 
   createdAt           DateTime @default(now()) @db.Timestamptz(3)
   
@@ -704,20 +713,39 @@ model EcdEditionHistory {
 }
 
 model RepertoireSong {
-  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  title        String
-  category     String    // Ex: "DOMINGO", "QUINTA-FEIRA"
-  tone_fem     String?   // Tom Feminino (Opcional)
-  tone_masc    String?   // Tom Masculino (Opcional)
+  id         String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  title      String
   
-  link_vs      String    // OBRIGATÓRIO (Drive/Multitrack)
-  link_youtube String?   // (Opcional)
-  link_spotify String?   // (Opcional)
-  link_cifra   String?   // (Opcional)
+  // Relacionamento: 1 música tem várias versões
+  versions   RepertoireSongVersion[] 
   
-  created_at   DateTime? @default(now()) @db.Timestamptz(3)
+  created_at DateTime?               @default(now()) @db.Timestamptz(3)
 
   @@map("repertoire_songs")
+  @@schema("app")
+}
+
+model RepertoireSongVersion {
+  id           String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  
+  // Relacionamento com a música pai
+  song_id      String         @db.Uuid
+  song         RepertoireSong @relation(fields: [song_id], references: [id], onDelete: Cascade)
+  
+  version_name String         // Ex: "Original", "Acústico"
+  category     String         // Ex: "DOMINGO", "QUINTA-FEIRA"
+  tone_fem     String?        // Tom Feminino (Opcional)
+  tone_masc    String?        // Tom Masculino (Opcional)
+  
+  // Links AGORA SÃO TODOS OPCIONAIS (repare na interrogação '?' no link_vs)
+  link_vs      String?        
+  link_youtube String?        
+  link_spotify String?        
+  link_cifra   String?        
+  
+  created_at   DateTime?      @default(now()) @db.Timestamptz(3)
+
+  @@map("repertoire_song_versions") // Cria a nova tabela no banco
   @@schema("app")
 }
 

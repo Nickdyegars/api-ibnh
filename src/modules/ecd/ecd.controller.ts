@@ -5,7 +5,6 @@ import { registerEcdSchema, editionEcdSchema } from './ecd.schemas.js';
 // 👇 Importando o nosso serviço de Auditoria
 import { AuditService } from '../../shared/services/audit/audit.service.js';
 import PDFDocument from 'pdfkit';
-import { PassThrough } from 'stream';
 import { prisma } from '../../shared/database/prisma.js';
 import { deleteImage } from '../../shared/storage/minio.js'; // Ajuste o caminho das pastas se necessário
 
@@ -264,32 +263,30 @@ export class EcdController {
       const requester = request.user as any;
       const { id } = request.params as { id: string };
 
-      // Recebe o arquivo do painel
+      // 👇 Lê se é o comprovante final da URL
+      const { type } = request.query as { type?: string };
+      const isFinal = type === 'final';
+
       const data = await request.file();
+      if (!data) return reply.status(400).send({ error: 'Nenhum arquivo enviado.' });
 
-      if (!data) {
-        return reply.status(400).send({ error: 'Nenhum arquivo enviado.' });
-      }
-
-      // Prepara o objeto igual ao que o seu Service já espera
       const fileObj = {
         filename: data.filename,
         buffer: await data.toBuffer(),
         mimetype: data.mimetype
       };
 
-      // Chama a regra de negócio no Service
-      const result = await ecdService.uploadReceiptAdmin(id, fileObj);
+      // 👇 Passa a informação pro Service
+      const result = await ecdService.uploadReceiptAdmin(id, fileObj, isFinal);
 
-      // 📝 LOG: Admin anexou um comprovante
       AuditService.log(requester.sub, 'UPLOAD_RECEIPT', 'ECD_REGISTRATION', id);
 
-      return reply.send({ success: true, receipt_photo_url: result.receipt_photo_url });
+      return reply.send({ success: true, receipt_photo_url: result.url });
     } catch (error: any) {
-      console.error("Erro no upload de comprovante pelo admin:", error);
-      return reply.status(500).send({ error: error.message || 'Erro interno ao salvar comprovante' });
+      return reply.status(500).send({ error: 'Erro ao salvar comprovante' });
     }
   }
+  
 
   async transferRegistrationLeader(request: FastifyRequest, reply: FastifyReply) {
     try {

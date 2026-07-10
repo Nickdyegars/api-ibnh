@@ -3,26 +3,21 @@ import { repertorioController } from './repertorio.controller.js';
 
 export async function repertorioRoutes(app: FastifyInstance) {
   
-  // ==========================================
-  // ROTA PÚBLICA (Qualquer um pode ver o repertório)
-  // ==========================================
+  // ROTA PÚBLICA (Visualização do Repertório)
   app.get('/', (req, rep) => repertorioController.getSongs(req, rep));
 
-  // ==========================================
-  // ROTAS PROTEGIDAS (Apenas Admin logados)
-  // ==========================================
+  // ROTAS PROTEGIDAS (Apenas usuários autorizados)
   app.register(async (protectedApp) => {
     
-    // 👇 Trava de Segurança Máxima (Token + Nível) 👇
     protectedApp.addHook('onRequest', async (request, reply) => {
       try {
         await request.jwtVerify();
         const requester = request.user as any;
         
-        // APENAS ADMINS (Nível 0) gerenciam o repertório
-        if (requester.level !== 0) {
+        // CORREÇÃO: Permite Nível 0 (Super Admin) e Nível 2 (Líderes/Secretaria) gerenciarem as músicas
+        if (requester.level !== 0 && requester.level !== 2) {
           return reply.status(403).send({ 
-            error: 'Acesso negado. Apenas administradores podem gerenciar o repertório.' 
+            error: 'Acesso negado. Você não tem permissão para gerenciar o repertório.' 
           });
         }
       } catch (err) {

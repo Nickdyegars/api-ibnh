@@ -14,6 +14,37 @@ function generateShortCode(length = 5): string {
   return result;
 }
 
+function formatEventPeriod(startDate?: Date | null, endDate?: Date | null): string {
+  if (!startDate || !endDate) return "Data a definir";
+
+  // Usamos UTC para evitar que o fuso horário atrase o dia impresso
+  const s = new Date(startDate);
+  const e = new Date(endDate);
+
+  const formatDay = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', timeZone: 'UTC' });
+  const formatMonth = new Intl.DateTimeFormat('pt-BR', { month: 'long', timeZone: 'UTC' });
+  const formatYear = new Intl.DateTimeFormat('pt-BR', { year: 'numeric', timeZone: 'UTC' });
+
+  const sDay = formatDay.format(s);
+  const sMonth = formatMonth.format(s);
+  const sYear = formatYear.format(s);
+
+  const eDay = formatDay.format(e);
+  const eMonth = formatMonth.format(e);
+  const eYear = formatYear.format(e);
+
+  // Se for no mesmo mês e ano (Ex: 21 a 23 de Novembro de 2026)
+  if (sMonth === eMonth && sYear === eYear) {
+    return `${sDay} a ${eDay} de ${sMonth} de ${sYear}`;
+  }
+  // Se for em meses diferentes (Ex: 31 de Outubro a 02 de Novembro de 2026)
+  else if (sYear === eYear) {
+    return `${sDay} de ${sMonth} a ${eDay} de ${eMonth} de ${sYear}`;
+  }
+  // Se cruzar o ano (Ex: 30 de Dezembro de 2026 a 01 de Janeiro de 2027)
+  return `${sDay} de ${sMonth} de ${sYear} a ${eDay} de ${eMonth} de ${eYear}`;
+}
+
 export class EcdService {
 
   // ==========================================
@@ -29,14 +60,18 @@ export class EcdService {
     if (!tokenRecord) throw new Error("TOKEN_NOT_FOUND");
     if (tokenRecord.isUsed) throw new Error("TOKEN_ALREADY_USED");
 
-    // Retorna apenas a cor da ficha para o Front-end saber como pintar a tela
     return {
       isValid: true,
       tokenType: tokenRecord.tokenType,
-      paymentLink: tokenRecord.edition?.encontristaPaymentLink ?? undefined
+      paymentLink: tokenRecord.edition?.encontristaPaymentLink ?? undefined,
+      priceTotal: tokenRecord.edition?.priceTotal ?? 100.00,
+      priceSignal: tokenRecord.edition?.priceSignal ?? 50.00,
+
+      // 👇 ADICIONE ESTAS DUAS LINHAS 👇
+      startDate: tokenRecord.edition?.startDate ?? null,
+      endDate: tokenRecord.edition?.endDate ?? null,
     };
   }
-
   async createRegistration(data: any, files: any) {
     // 1. Busca a Ficha e vê se é válida
     const tokenRecord = await prisma.ecdToken.findUnique({ where: { id: data.token } });
@@ -106,7 +141,8 @@ export class EcdService {
 
           lgpd_consent: data.lgpdConsent,
           lgpd_consent_date: data.lgpdConsentDate ? new Date(data.lgpdConsentDate) : new Date(),
-          lgpd_terms_version: data.lgpdTermsVersion || '1.0'
+          lgpd_terms_version: data.lgpdTermsVersion || '1.0',
+          paymentType: data.paymentType || null,
         }
       });
 
@@ -276,16 +312,24 @@ export class EcdService {
     });
   }
 
-  async uploadReceiptAdmin(id: string, file: any) {
+  async uploadReceiptAdmin(id: string, file: any, isFinal: boolean = false) {
     const reg = await prisma.ecdRegistration.findUnique({ where: { id } });
     if (!reg) throw new Error("Ficha não encontrada.");
 
+    // Faz o upload pro MinIO
     const receiptUrl = await uploadImage(file.filename, file.buffer, file.mimetype, 'ecd/receipts');
 
-    return await prisma.ecdRegistration.update({
+    // 👇 Salva na coluna correta
+    const dataUpdate = isFinal
+      ? { receipt_final_photo_url: receiptUrl }
+      : { receipt_photo_url: receiptUrl };
+
+    const updatedReg = await prisma.ecdRegistration.update({
       where: { id },
-      data: { receipt_photo_url: receiptUrl }
+      data: dataUpdate
     });
+
+    return { url: receiptUrl };
   }
 
   async transferRegistrationLeader(registrationId: string, newLeaderId: string) {
@@ -372,7 +416,11 @@ export class EcdService {
           worker_slots: data.workerSlots,
           encontristaPaymentLink: data.encontristaPaymentLink ?? null,
           workerPaymentLink: data.workerPaymentLink ?? null,
-          is_active: true
+          is_active: true,
+          priceTotal: data.priceTotal || 100.00,  // 👈 Salva o valor total
+          priceSignal: data.priceSignal || 50.00, // 👈 Salva o valor do sinal
+          startDate: data.startDate ? new Date(data.startDate) : null,
+          endDate: data.endDate ? new Date(data.endDate) : null,
         }
       });
 
@@ -410,7 +458,9 @@ export class EcdService {
         green_slots: data.greenSlots,
         worker_slots: data.workerSlots,
         encontristaPaymentLink: data.encontristaPaymentLink ?? null,
-        workerPaymentLink: data.workerPaymentLink ?? null
+        workerPaymentLink: data.workerPaymentLink ?? null,
+        startDate: data.startDate ? new Date(data.startDate) : null,
+        endDate: data.endDate ? new Date(data.endDate) : null,
       }
     });
   }
@@ -551,13 +601,17 @@ export class EcdService {
 
     await prisma.ecdToken.createMany({ data: tokensToCreate, skipDuplicates: true });
 
-    // 3. DESENHO DO NOVO PDF (1 QR CODE + ESPAÇO PARA O PIN)
+    // 3. PREPARAÇÃO DOS DADOS FORMATADOS
+    const eventDate = formatEventPeriod(edition.startDate, edition.endDate);
+    const totalStr = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(edition.priceTotal || 100);
+    const signalStr = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(edition.priceSignal || 50);
+
+    // 4. DESENHO DO NOVO PDF (DESIGN INGRESSO)
     const doc = new PDFDocument({ size: 'A4', margin: 30 });
     const rowHeight = 230;
     const startY = 40;
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
 
-    // Variáveis para controlar a numeração sequencial das fichas
     let currentYellowNumber = alreadyYellow;
     let currentGreenNumber = alreadyGreen;
 
@@ -570,7 +624,6 @@ export class EcdService {
       const currentY = startY + (index % 3) * rowHeight;
       const colorHex = token.tokenType === 'AMARELA' ? '#eab308' : '#16a34a';
 
-      // Define o número sequencial para esta ficha específica
       let seqNumber = 0;
       if (token.tokenType === 'AMARELA') {
         currentYellowNumber++;
@@ -580,33 +633,52 @@ export class EcdService {
         seqNumber = currentGreenNumber;
       }
 
-      // Borda Externa da Ficha
+      // Borda Externa do Ingresso
       doc.rect(30, currentY, 535, 210).strokeColor('#cbd5e1').lineWidth(1).stroke();
 
       // Faixa Superior Colorida com o NÚMERO SEQUENCIAL
       doc.rect(30, currentY, 535, 35).fill(colorHex);
       doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType} Nº ${seqNumber}`, 45, currentY + 12);
 
-      // Texto de Instruções (Lado Esquerdo)
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(12).text('COMO SE INSCREVER:', 45, currentY + 55);
-      doc.font('Helvetica').fontSize(10).fillColor('#334155')
-        .text('1. Aponte a câmera do celular para o QR Code ao lado.', 45, currentY + 75)
-        .text('2. Preencha o formulário.', 45, currentY + 95)
-        .text('3. Digite o PIN do seu líder (anotado na caixa abaixo).', 45, currentY + 115);
+      // 👇 DIVISÓRIA VERTICAL DO TICKET (Estilo Canhoto) 👇
+      doc.moveTo(380, currentY + 35).lineTo(380, currentY + 240).strokeColor('#e2e8f0').lineWidth(1).dash(5, { space: 5 }).stroke();
+      doc.undash(); // Evita que as outras linhas fiquem tracejadas
 
+      // ==========================================
+      // LADO ESQUERDO: INFORMAÇÕES E INSTRUÇÕES
+      // ==========================================
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(11).text('INFORMAÇÕES DO EVENTO', 45, currentY + 50);
+
+      doc.fillColor('#475569').font('Helvetica').fontSize(10);
+      doc.text(`Data: `, 45, currentY + 68, { continued: true }).font('Helvetica-Bold').text(eventDate);
+      doc.font('Helvetica').text(`Valor: `, 45, currentY + 83, { continued: true }).font('Helvetica-Bold').text(`${totalStr} (Sinal mínimo para reserva: ${signalStr})`);
+
+      // Linha divisória fina
+      doc.moveTo(45, currentY + 105).lineTo(360, currentY + 105).strokeColor('#f1f5f9').lineWidth(1).stroke();
+
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(10).text('COMO GARANTIR SUA VAGA:', 45, currentY + 115);
+      doc.fillColor('#475569').font('Helvetica').fontSize(9)
+        .text('1. Escaneie o QR Code ao lado com a câmera do celular.', 45, currentY + 130)
+        .text('2. Preencha o formulário e anexe o comprovante do pagamento PIX.', 45, currentY + 145)
+        .text('3. Digite o código do seu líder (PIN) na primeira etapa da tela.', 45, currentY + 160);
+
+      // ==========================================
+      // LADO DIREITO: QR CODE E PIN
+      // ==========================================
       // Caixa para o Líder escrever o PIN a caneta
-      doc.rect(45, currentY + 145, 300, 50).fillAndStroke('#f8fafc', '#94a3b8');
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(10).text('CÓDIGO DO LÍDER (PIN):', 55, currentY + 155);
-      doc.fillColor('#cbd5e1').font('Helvetica-Bold').fontSize(14).text('ESCREVA O PIN AQUI', 55, currentY + 172);
+      doc.rect(395, currentY + 45, 150, 35).fillAndStroke('#f8fafc', '#94a3b8');
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8).text('CÓDIGO DO LÍDER (PIN):', 400, currentY + 52, { width: 140, align: 'center' });
+      doc.fillColor('#cbd5e1').font('Helvetica-Bold').fontSize(12).text('', 400, currentY + 64, { width: 140, align: 'center' });
 
-      // QR Code Único (Lado Direito)
+      // QR Code Único
       const publicUrl = `${baseUrl}/ecd/cadastro?token=${token.id}`;
-      const publicQrBuffer = await QRCode.toBuffer(publicUrl, { margin: 1, width: 140 });
+      const publicQrBuffer = await QRCode.toBuffer(publicUrl, { margin: 1, width: 110 });
+      doc.image(publicQrBuffer, 415, currentY + 90, { width: 110 });
 
-      doc.image(publicQrBuffer, 400, currentY + 45, { width: 140 });
+      doc.link(415, currentY + 90, 110, 110, publicUrl);
 
-      // ID de Segurança (Rodapé do QR Code)
-      doc.font('Helvetica').fontSize(8).fillColor('#94a3b8').text(`ID: ${token.shortCode} | Link de uso único`, 400, currentY + 190, { align: 'center', width: 140 });
+      // ID de Segurança
+      doc.font('Helvetica').fontSize(8).fillColor('#94a3b8').text(`ID: ${token.shortCode} | Link de uso único`, 395, currentY + 210, { align: 'center', width: 150 });
     }
 
     doc.end();
@@ -712,12 +784,16 @@ export class EcdService {
   // REIMPRESSÃO DE FICHAS NÃO UTILIZADAS
   // ==========================================
   async reprintTokensPdf(editionId: string) {
-    // 1. Busca TODAS as fichas da edição em ordem de criação para descobrirmos o número original
+    // 1. Busca os dados da EDIÇÃO primeiro (Para a Data e Valores)
+    const edition = await prisma.ecdEdition.findUnique({ where: { id: editionId } });
+    if (!edition) throw new Error("Edição não encontrada.");
+
+    // 2. Busca TODAS as fichas da edição em ordem de criação para descobrirmos o número original
     const allTokens = await prisma.ecdToken.findMany({
       where: { editionId: editionId },
       orderBy: [
-        { createdAt: 'asc' }, // Primeiro organiza por tempo
-        { id: 'asc' }         // 👈 O DESEMPATE: Se o tempo for igual, organiza por ID (Ordem alfabética do código)
+        { createdAt: 'asc' },
+        { id: 'asc' }
       ]
     });
 
@@ -725,15 +801,13 @@ export class EcdService {
       throw new Error("Não existem fichas geradas para esta edição.");
     }
 
-    // 2. Filtra apenas as que não foram usadas, mas já "carimbadas" com o número original delas
+    // 3. Filtra apenas as que não foram usadas, mas já "carimbadas" com o número original delas
     const tokensToPrint: any[] = [];
     let countYellow = 0;
     let countGreen = 0;
 
     for (const token of allTokens) {
       let originalNumber = 0;
-
-      // Conta todas as fichas (usadas ou não) para manter a sequência matemática perfeita
       if (token.tokenType === 'AMARELA') {
         countYellow++;
         originalNumber = countYellow;
@@ -742,7 +816,6 @@ export class EcdService {
         originalNumber = countGreen;
       }
 
-      // Se a ficha AINDA NÃO foi usada, vai para a fila de impressão com o seu número!
       if (token.isUsed === false) {
         tokensToPrint.push({ ...token, originalNumber });
       }
@@ -752,10 +825,14 @@ export class EcdService {
       throw new Error("Todas as fichas impressas desta edição já foram utilizadas!");
     }
 
-    // Ordena para imprimir primeiro as Amarelas, depois as Verdes
     tokensToPrint.sort((a, b) => a.tokenType.localeCompare(b.tokenType));
 
-    // 3. DESENHO DO PDF
+    // 4. PREPARAÇÃO DOS DADOS FORMATADOS
+    const eventDate = formatEventPeriod(edition.startDate, edition.endDate);
+    const totalStr = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(edition.priceTotal || 100);
+    const signalStr = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(edition.priceSignal || 50);
+
+    // 5. DESENHO DO PDF
     const doc = new PDFDocument({ size: 'A4', margin: 30 });
     const rowHeight = 230;
     const startY = 40;
@@ -773,32 +850,42 @@ export class EcdService {
       // Borda Externa
       doc.rect(30, currentY, 535, 210).strokeColor('#cbd5e1').lineWidth(1).stroke();
 
-      // 👇 MÁGICA AQUI: Faixa Superior Colorida com o NÚMERO ORIGINAL 👇
+      // Faixa Superior Colorida (COM AVISO DE REIMPRESSÃO)
       doc.rect(30, currentY, 535, 35).fill(colorHex);
       doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType} Nº ${token.originalNumber} (REIMPRESSÃO)`, 45, currentY + 12);
 
-      // Instruções
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(12).text('COMO SE INSCREVER:', 45, currentY + 55);
-      doc.font('Helvetica').fontSize(10).fillColor('#334155')
-        .text('1. Aponte a câmera do celular para o QR Code ao lado.', 45, currentY + 75)
-        .text('2. Preencha o formulário.', 45, currentY + 95)
-        .text('3. Digite o PIN do seu líder (anotado na caixa abaixo).', 45, currentY + 115);
+      // Divisória Tracejada
+      doc.moveTo(380, currentY + 35).lineTo(380, currentY + 240).strokeColor('#e2e8f0').lineWidth(1).dash(5, { space: 5 }).stroke();
+      doc.undash();
 
-      // Caixa do PIN
-      doc.rect(45, currentY + 145, 300, 50).fillAndStroke('#f8fafc', '#94a3b8');
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(10).text('CÓDIGO DO LÍDER (PIN):', 55, currentY + 155);
-      doc.fillColor('#cbd5e1').font('Helvetica-Bold').fontSize(14).text('ESCREVA O PIN AQUI', 55, currentY + 172);
+      // LADO ESQUERDO: INFORMAÇÕES E INSTRUÇÕES
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(11).text('INFORMAÇÕES DO EVENTO', 45, currentY + 50);
 
-      // QR Code
+      doc.fillColor('#475569').font('Helvetica').fontSize(10);
+      doc.text(`Data: `, 45, currentY + 68, { continued: true }).font('Helvetica-Bold').text(eventDate);
+      doc.font('Helvetica').text(`Valor: `, 45, currentY + 83, { continued: true }).font('Helvetica-Bold').text(`${totalStr} (Sinal mínimo para reserva: ${signalStr})`);
+
+      doc.moveTo(45, currentY + 105).lineTo(360, currentY + 105).strokeColor('#f1f5f9').lineWidth(1).stroke();
+
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(10).text('COMO GARANTIR SUA VAGA:', 45, currentY + 115);
+      doc.fillColor('#475569').font('Helvetica').fontSize(9)
+        .text('1. Escaneie o QR Code ao lado com a câmera do celular.', 45, currentY + 130)
+        .text('2. Preencha o formulário e anexe o comprovante do pagamento PIX.', 45, currentY + 145)
+        .text('3. Digite o código do seu líder (PIN) na primeira etapa da tela.', 45, currentY + 160);
+
+      // LADO DIREITO: QR CODE E PIN
+      doc.rect(395, currentY + 45, 150, 35).fillAndStroke('#f8fafc', '#94a3b8');
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8).text('CÓDIGO DO LÍDER (PIN):', 400, currentY + 52, { width: 140, align: 'center' });
+      doc.fillColor('#cbd5e1').font('Helvetica-Bold').fontSize(12).text('', 400, currentY + 64, { width: 140, align: 'center' });
+
+      // QR Code Clicável
       const publicUrl = `${baseUrl}/ecd/cadastro?token=${token.id}`;
-      const publicQrBuffer = await QRCode.toBuffer(publicUrl, { margin: 1, width: 140 });
-      doc.image(publicQrBuffer, 400, currentY + 45, { width: 140 });
+      const publicQrBuffer = await QRCode.toBuffer(publicUrl, { margin: 1, width: 110 });
 
-      // 👇 MÁGICA AQUI: Transforma a área exata da imagem do QR Code num link clicável 👇
-      doc.link(400, currentY + 45, 140, 140, publicUrl);
+      doc.image(publicQrBuffer, 415, currentY + 90, { width: 110 });
+      doc.link(415, currentY + 90, 110, 110, publicUrl); // Link Clicável na área do QR Code
 
-      // ID (Aproveitei para mudar o texto e avisar a pessoa que ela pode clicar)
-      doc.font('Helvetica').fontSize(8).fillColor('#94a3b8').text(`ID: ${token.shortCode} | Escaneie ou Clique`, 400, currentY + 190, { align: 'center', width: 140 });
+      doc.font('Helvetica').fontSize(8).fillColor('#94a3b8').text(`ID: ${token.shortCode} | Escaneie ou Clique`, 395, currentY + 210, { align: 'center', width: 150 });
     }
 
     doc.end();

@@ -31,6 +31,7 @@ export const registerEcdSchema = z.object({
   lgpdTermsVersion: z.string().optional(),
   spiritualStatus: z.string().optional(),
   inviteCode: z.string().min(1, "O Código do Líder é obrigatório"),
+  paymentType: z.string().optional().nullable(),
 });
 
 export const editionEcdSchema = z.object({
@@ -39,7 +40,11 @@ export const editionEcdSchema = z.object({
   greenSlots: z.number().int().min(0, "A cota não pode ser negativa").or(z.string().transform(Number)),
   workerSlots: z.number().int().min(0, "A cota não pode ser negativa").or(z.string().transform(Number)),
   encontristaPaymentLink: z.string().optional().nullable(),
-  workerPaymentLink: z.string().optional().nullable()
+  workerPaymentLink: z.string().optional().nullable(),
+  priceTotal: z.number().optional().nullable(),
+  priceSignal: z.number().optional().nullable(),
+  startDate: z.string().optional().nullable(),
+  endDate: z.string().optional().nullable(),
 });
 
 export type RegisterEcdType = z.infer<typeof registerEcdSchema>;

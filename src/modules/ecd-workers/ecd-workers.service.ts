@@ -69,6 +69,21 @@ export class EcdWorkersService {
     }
 
     async validateToken(tokenCode: string) {
+        // 1. NOVO FLUXO: Verifica se o token é o ID de um Líder (Link da Área)
+        const leader = await prisma.ecdWorkerLeader.findUnique({
+            where: { id: tokenCode },
+            include: { area: true }
+        });
+
+        if (leader) {
+            return {
+                isValid: true,
+                leaderName: leader.name,
+                areaName: leader.area.name
+            };
+        }
+
+        // 2. FLUXO ANTIGO: Verifica se é um token descartável de uso único
         const token = await prisma.ecdWorkerToken.findUnique({
             where: { token_code: tokenCode },
             include: { leader: { include: { area: true } } }
@@ -82,34 +97,84 @@ export class EcdWorkersService {
 
     // --- FICHAS DE INSCRIÇÃO ---
     async createRegistration(data: RegisterWorkerType) {
-        // 1. Tenta encontrar o token na tabela de líderes (Link do Líder)
+        // 1. TENTA ACHAR O LÍDER (Link da Área Multi-uso)
+        const leader = await prisma.ecdWorkerLeader.findUnique({
+            where: { id: data.token }
+        });
+
+        if (leader) {
+            // TRAVA DE VAGAS NA INSCRIÇÃO: Verifica se a área já encheu
+            if (leader.slots && leader.slots > 0) {
+                const registrationsCount = await prisma.ecdWorkerRegistration.count({
+                    where: {
+                        leader_id: leader.id,
+                        status: { not: 'RECUSADO' } // Conta todo mundo que está pendente ou aprovado
+                    }
+                });
+
+                if (registrationsCount >= leader.slots) {
+                    throw new Error(`As inscrições para a área de ${leader.name} já estão esgotadas.`);
+                }
+            }
+
+            return await prisma.$transaction(async (tx) => {
+                // Gera o token descartável interno para satisfazer a regra do banco
+                const internalToken = await tx.ecdWorkerToken.create({
+                    data: { leader_id: leader.id, is_used: true }
+                });
+
+                return await tx.ecdWorkerRegistration.create({
+                    data: { // 👇 A propriedade 'data' obrigatória do Prisma
+                        full_name: data.fullName,
+                        gender: data.gender,
+                        phone: data.phone,
+                        age: data.age,
+                        marital_status: data.maritalStatus,
+                        has_served_before: data.hasServedBefore,
+                        bringing_target: data.bringingTarget,
+                        relative_participating: data.relativeParticipating,
+                        previous_team: data.previousTeam ?? null,
+                        target_name: data.targetName ?? null,
+                        cell_leader: data.cellLeader ?? null,
+                        relative_kinship: data.relativeKinship ?? null,
+                        emergency_contact: data.emergencyContact ?? null,
+                        emergency_phone: data.emergencyPhone ?? null,
+                        health_issues: data.healthIssues ?? null,
+                        dietary_restrictions: data.dietaryRestrictions ?? null,
+                        observations: data.observations ?? null,
+                        profile_photo_url: data.profilePhotoUrl ?? null,
+                        receipt_photo_url: data.receiptPhotoUrl ?? null,
+                        audio_record_url: data.audioRecordUrl ?? null,
+
+                        lgpd_consent: data.lgpdConsent,
+                        lgpd_consent_date: data.lgpdConsentDate ? new Date(data.lgpdConsentDate) : new Date(),
+                        lgpd_terms_version: data.lgpdTermsVersion || '1.0',
+
+                        status: 'PENDENTE',
+                        payment_status: 'PENDENTE',
+
+                        // Vínculos automáticos da Área!
+                        edition_id: leader.edition_id,
+                        area_id: leader.area_id,
+                        leader_id: leader.id,
+                        token_id: internalToken.id
+                    }
+                });
+            });
+        }
+
+        // 2. SE NÃO ACHOU O LÍDER, VERIFICA SE É O TOKEN DESCARTÁVEL (Fluxo Antigo)
         const tokenRecord = await prisma.ecdWorkerToken.findFirst({
             where: { token_code: data.token },
             include: { leader: true }
         });
 
-        // 2. A MÁGICA DA UNIFICAÇÃO
-        if (!tokenRecord) {
-            const isEditionToken = await prisma.ecdEdition.findFirst({
-                where: { public_token: data.token }
-            });
-
-            if (isEditionToken) {
-                // Bingo! É o link geral. Encaminha os dados para o método genérico e finaliza
-                // Os dados da LGPD já estão dentro de 'data', então o método genérico também vai recebê-los
-                return await this.createRegistrationGeneric(data);
-            }
-
-            // Se não achar em nenhuma das duas tabelas, aí sim dispara o erro para o Front-end
-            throw new Error("TOKEN_NOT_FOUND");
-        }
-
-        // 3. Se achou o token de líder, segue o fluxo normal de links individuais...
+        if (!tokenRecord) throw new Error("TOKEN_NOT_FOUND");
         if (tokenRecord.is_used) throw new Error("TOKEN_ALREADY_USED");
 
         return await prisma.$transaction(async (tx) => {
             const registration = await tx.ecdWorkerRegistration.create({
-                data: {
+                data: { // 👇 A propriedade 'data' obrigatória também precisa estar aqui
                     full_name: data.fullName,
                     gender: data.gender,
                     phone: data.phone,
@@ -118,7 +183,6 @@ export class EcdWorkersService {
                     has_served_before: data.hasServedBefore,
                     bringing_target: data.bringingTarget,
                     relative_participating: data.relativeParticipating,
-
                     previous_team: data.previousTeam ?? null,
                     target_name: data.targetName ?? null,
                     cell_leader: data.cellLeader ?? null,
@@ -128,18 +192,18 @@ export class EcdWorkersService {
                     health_issues: data.healthIssues ?? null,
                     dietary_restrictions: data.dietaryRestrictions ?? null,
                     observations: data.observations ?? null,
-
                     profile_photo_url: data.profilePhotoUrl ?? null,
                     receipt_photo_url: data.receiptPhotoUrl ?? null,
                     audio_record_url: data.audioRecordUrl ?? null,
 
-                    // 👇 SALVANDO A AUDITORIA LGPD AQUI 👇
                     lgpd_consent: data.lgpdConsent,
                     lgpd_consent_date: data.lgpdConsentDate ? new Date(data.lgpdConsentDate) : new Date(),
                     lgpd_terms_version: data.lgpdTermsVersion || '1.0',
 
                     status: 'PENDENTE',
                     payment_status: 'PENDENTE',
+
+                    // Vínculos de quem gerou o token original
                     area_id: tokenRecord.leader.area_id,
                     leader_id: tokenRecord.leader_id,
                     token_id: tokenRecord.id

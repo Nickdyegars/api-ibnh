@@ -42,20 +42,19 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
       }
 
       // 2. TRAVA DE SEGURANÇA
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      if (!uuidRegex.test(String(providedToken))) {
-        return reply.status(400).send({ error: 'Formato de token inválido.' });
-      }
-
-      let isValidToken = await prisma.ecdWorkerToken.findFirst({
+      let isValidToken: any = await prisma.ecdWorkerToken.findFirst({
         where: { token_code: String(providedToken) }
       });
 
+      // Se não for um token descartável, verifica se é o Link da Área (ID do Líder)
       if (!isValidToken) {
-        const isEditionToken = await prisma.ecdEdition.findFirst({
-          where: { public_token: String(providedToken) }
+        isValidToken = await prisma.ecdWorkerLeader.findUnique({
+          where: { id: String(providedToken) }
         });
-        if (isEditionToken) isValidToken = true as any;
+      }
+
+      if (!isValidToken) {
+        return reply.status(401).send({ error: 'Token da área inválido. Upload bloqueado.' });
       }
 
       if (!isValidToken) {

@@ -45,6 +45,7 @@ export const editionEcdSchema = z.object({
   priceSignal: z.number().optional().nullable(),
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
+  workerPrice: z.number().optional().nullable(),
 });
 
 export type RegisterEcdType = z.infer<typeof registerEcdSchema>;

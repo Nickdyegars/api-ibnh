@@ -419,6 +419,7 @@ export class EcdService {
           is_active: true,
           priceTotal: data.priceTotal || 100.00,  // 👈 Salva o valor total
           priceSignal: data.priceSignal || 50.00, // 👈 Salva o valor do sinal
+          workerPrice: data.workerPrice || 50.00,
           startDate: data.startDate ? new Date(data.startDate) : null,
           endDate: data.endDate ? new Date(data.endDate) : null,
         }
@@ -459,6 +460,9 @@ export class EcdService {
         worker_slots: data.workerSlots,
         encontristaPaymentLink: data.encontristaPaymentLink ?? null,
         workerPaymentLink: data.workerPaymentLink ?? null,
+        priceTotal: data.priceTotal ?? null, 
+        priceSignal: data.priceSignal ?? null, 
+        workerPrice: data.workerPrice ?? null,
         startDate: data.startDate ? new Date(data.startDate) : null,
         endDate: data.endDate ? new Date(data.endDate) : null,
       }

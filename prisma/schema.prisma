@@ -484,6 +484,7 @@ model EcdEdition {
   public_token           String?   @unique @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   encontristaPaymentLink String?   @map("encontrista_payment_link") @db.Text
   workerPaymentLink      String?   @map("worker_payment_link") @db.Text
+  workerPrice            Float?    @map("worker_price") @default(50.00)
 
   // 👇 NOVOS CAMPOS DE VALORES ADICIONADOS AQUI 👇
   priceTotal             Float?    @map("price_total") @default(100.00)

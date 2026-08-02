@@ -28,7 +28,19 @@ export class EcdWorkersController {
         try {
             return reply.send(await service.validateToken(request.params.token));
         } catch (error: any) {
-            return reply.status(400).send({ success: false, message: error.message });
+
+            // 👇 Mapeamento correto dos erros para o Front-end
+            if (error.message === "SLOTS_FULL") {
+                return reply.status(400).send({ success: false, message: "SLOTS_FULL" });
+            }
+            if (error.message === "TOKEN_NOT_FOUND") {
+                return reply.status(404).send({ success: false, message: "Link inválido." });
+            }
+            if (error.message === "TOKEN_ALREADY_USED") {
+                return reply.status(400).send({ success: false, message: "Este link já foi utilizado." });
+            }
+
+            return reply.status(500).send({ success: false, message: "Erro ao validar o link." });
         }
     }
 
@@ -248,6 +260,21 @@ export class EcdWorkersController {
             return reply.send(updated);
         } catch (error) {
             return reply.status(500).send({ error: 'Erro ao atualizar dados da ficha.' });
+        }
+    }
+
+    async generatePdf(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const { id } = request.params as { id: string };
+            const pdfDoc = await service.generateWorkerLeaderPdf(id);
+
+            // Define os headers para forçar o download de um arquivo PDF
+            reply.header('Content-Type', 'application/pdf');
+            reply.header('Content-Disposition', `attachment; filename="fichas_equipe_${id.substring(0, 5)}.pdf"`);
+
+            return reply.send(pdfDoc);
+        } catch (error: any) {
+            return reply.status(400).send({ error: error.message });
         }
     }
 }

@@ -19,7 +19,6 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
       let fileData: any = null;
       let providedToken: string | null = null;
 
-      // 1. Extrai o arquivo e o token de forma 100% segura para o TypeScript
       for await (const part of parts) {
         if (part.type === 'file') {
           const buffer = await part.toBuffer();
@@ -41,21 +40,10 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Token de autorização ausente.' });
       }
 
-      // 2. TRAVA DE SEGURANÇA
-      let isValidToken: any = await prisma.ecdWorkerToken.findFirst({
-        where: { token_code: String(providedToken) }
+      // 👇 NOVA TRAVA DE SEGURANÇA (Busca pelo Líder) 👇
+      const isValidToken = await prisma.ecdWorkerLeader.findUnique({
+        where: { id: String(providedToken) }
       });
-
-      // Se não for um token descartável, verifica se é o Link da Área (ID do Líder)
-      if (!isValidToken) {
-        isValidToken = await prisma.ecdWorkerLeader.findUnique({
-          where: { id: String(providedToken) }
-        });
-      }
-
-      if (!isValidToken) {
-        return reply.status(401).send({ error: 'Token da área inválido. Upload bloqueado.' });
-      }
 
       if (!isValidToken) {
         return reply.status(401).send({ error: 'Token de inscrição inválido. Upload bloqueado.' });
@@ -68,7 +56,7 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
         fileName,
         fileData.buffer,
         fileData.mimetype,
-        'ecd/audio' // Salva o áudio organizadinho na subpasta
+        'ecd/audio'
       );
 
       return reply.send({ url: audioUrl });
@@ -79,24 +67,13 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
   });
 
   // Rota para Upload de Arquivos Diversos (Perfil/Comprovantes)
-  // Rota para Upload de Arquivos Diversos (Perfil/Comprovantes)
   app.post('/public/upload/:type', async (request, reply) => {
     try {
       const { type } = request.params as { type: string };
 
-      // 👇 CORREÇÃO: Padronizando o nome das pastas para inglês igual ao resto do sistema
       let subfolder = 'outros';
       if (type === 'profile') subfolder = 'profiles';
       if (type === 'receipt') subfolder = 'receipts';
-
-      // 1. TRAVA DO ADMIN: Se for comprovativo, exige JWT de Admin logado!
-      if (type === 'receipt') {
-        try {
-          await request.jwtVerify();
-        } catch (err) {
-          return reply.status(401).send({ error: 'Acesso negado. Apenas administradores podem enviar comprovantes.' });
-        }
-      }
 
       const parts = request.parts();
       let fileData: any = null;
@@ -119,8 +96,8 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Arquivo ausente.' });
       }
 
-      // 2. TRAVA PÚBLICA: Se for foto de perfil, valida o Token.
-      if (type === 'profile') {
+      // 👇 NOVA TRAVA PÚBLICA (Protege o Perfil E o Comprovante) 👇
+      if (type === 'profile' || type === 'receipt') {
         if (!providedToken) {
           return reply.status(400).send({ error: 'Token de autorização ausente no formulário.' });
         }
@@ -130,17 +107,10 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
           return reply.status(400).send({ error: 'Formato de token inválido. Use um link oficial do evento.' });
         }
 
-        let isValidToken = await prisma.ecdWorkerToken.findFirst({
-          where: { token_code: String(providedToken) }
+        // Nova busca correta validando o ID do líder
+        const isValidToken = await prisma.ecdWorkerLeader.findUnique({
+          where: { id: String(providedToken) }
         });
-
-        if (!isValidToken) {
-          const isEditionToken = await prisma.ecdEdition.findFirst({
-            where: { public_token: String(providedToken) }
-          });
-
-          if (isEditionToken) isValidToken = true as any;
-        }
 
         if (!isValidToken) {
           return reply.status(401).send({ error: 'Token de inscrição inválido. Upload bloqueado.' });
@@ -152,7 +122,7 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
         fileData.filename,
         fileData.buffer,
         fileData.mimetype,
-        `ecd/${subfolder}` // Agora salvará sempre em 'ecd/profiles' ou 'ecd/receipts'
+        `ecd/${subfolder}`
       );
 
       return reply.send({ url: imageUrl });
@@ -184,6 +154,7 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
     childApp.post('/areas', (req, rep) => controller.createArea(req, rep));
     childApp.put('/areas/:id', (req, rep) => controller.updateArea(req, rep));
     childApp.delete('/areas/:id', (req, rep) => controller.deleteArea(req, rep));
+    childApp.get('/leaders/:id/pdf', (req, rep) => controller.generatePdf(req, rep));
 
     // Líderes de Equipe
     childApp.get('/leaders', (req, rep) => controller.getLeaders(req, rep));

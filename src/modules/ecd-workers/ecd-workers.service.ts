@@ -1,6 +1,8 @@
 import { prisma } from '../../shared/database/prisma.js';
 import { WorkerAreaType, WorkerLeaderType, RegisterWorkerType } from './ecd-workers.schemas.js';
 import { deleteImage } from '../../shared/storage/minio.js';
+import PDFDocument from 'pdfkit';
+import QRCode from 'qrcode';
 
 export class EcdWorkersService {
 
@@ -72,14 +74,31 @@ export class EcdWorkersService {
         // 1. NOVO FLUXO: Verifica se o token é o ID de um Líder (Link da Área)
         const leader = await prisma.ecdWorkerLeader.findUnique({
             where: { id: tokenCode },
-            include: { area: true }
+            include: { area: true, edition: true }
         });
 
         if (leader) {
+            // 👇 NOVA TRAVA FRONTAL AQUI 👇
+            if (leader.slots && leader.slots > 0) {
+                const registrationsCount = await prisma.ecdWorkerRegistration.count({
+                    where: {
+                        leader_id: leader.id,
+                        status: { not: 'RECUSADO' } // Conta quem está pendente ou aprovado
+                    }
+                });
+
+                if (registrationsCount >= leader.slots) {
+                    throw new Error("SLOTS_FULL");
+                }
+            }
+            // 👆 FIM DA TRAVA FRONTAL 👆
+
             return {
                 isValid: true,
                 leaderName: leader.name,
-                areaName: leader.area.name
+                areaName: leader.area.name,
+                workerPrice: leader.edition?.workerPrice || 50.00,
+                workerPixKey: leader.edition?.workerPaymentLink || 'Chave não cadastrada'
             };
         }
 
@@ -455,5 +474,80 @@ export class EcdWorkersService {
                 observations: data.observations
             }
         });
+    }
+
+    async generateWorkerLeaderPdf(leaderId: string) {
+        const leader = await prisma.ecdWorkerLeader.findUnique({
+            where: { id: leaderId },
+            include: { area: true, edition: true }
+        });
+
+        if (!leader) throw new Error("Líder não encontrado.");
+
+        const doc = new PDFDocument({ size: 'A4', margin: 30 });
+        const rowHeight = 230;
+        const startY = 40;
+        const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
+
+        const publicUrl = `${baseUrl}/ecd/cadastro-trabalhador?token=${leader.id}`;
+        const publicQrBuffer = await QRCode.toBuffer(publicUrl, { margin: 1, width: 110 });
+
+        const getAreaColor = (areaName: string) => {
+            const name = areaName.toUpperCase().trim();
+            const colors: Record<string, string> = {
+                'INTERCESSÃO': '#dc2626',
+                'COZINHA': '#2563eb',
+                'LOUVOR': '#854d0e',
+                'CANTINA': '#eab308',
+                'ORNAMENTAÇÃO': '#0ea5e9',
+                'MULTIMÍDIA': '#991b1b',
+                'CORREIOS': '#1e293b',
+                'APOIO': '#9333ea',
+            };
+            return colors[name] || '#4f46e5';
+        };
+
+        const areaColor = getAreaColor(leader.area?.name || 'Geral');
+
+        // 👇 Loop fixo: Sempre desenha 3 fichas para preencher exatamente 1 folha A4
+        for (let index = 0; index < 3; index++) {
+            const currentY = startY + (index * rowHeight);
+
+            doc.rect(30, currentY, 535, 210).strokeColor('#cbd5e1').lineWidth(1).stroke();
+
+            // Título sem numeração sequencial
+            doc.rect(30, currentY, 535, 35).fill(areaColor);
+            doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14)
+                .text(`FICHA DE INSCRIÇÃO - EQUIPE DE TRABALHO`, 45, currentY + 12);
+
+            doc.moveTo(380, currentY + 35).lineTo(380, currentY + 240).strokeColor('#e2e8f0').lineWidth(1).dash(5, { space: 5 }).stroke();
+            doc.undash();
+
+            doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(11).text('DADOS DA LIDERANÇA', 45, currentY + 50);
+
+            doc.fillColor('#475569').font('Helvetica').fontSize(10);
+            doc.text(`Área: `, 45, currentY + 68, { continued: true }).font('Helvetica-Bold').text((leader.area?.name || 'Geral').toUpperCase());
+            doc.font('Helvetica').text(`Líder Responsável: `, 45, currentY + 83, { continued: true }).font('Helvetica-Bold').text(leader.name);
+
+            doc.moveTo(45, currentY + 105).lineTo(360, currentY + 105).strokeColor('#f1f5f9').lineWidth(1).stroke();
+
+            doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(10).text('COMO GARANTIR SUA VAGA NA EQUIPE:', 45, currentY + 115);
+            doc.fillColor('#475569').font('Helvetica').fontSize(9)
+                .text('1. Escaneie o QR Code ao lado com a câmera do seu celular.', 45, currentY + 130)
+                .text('2. Preencha seus dados de saúde, logística e anexe sua foto de perfil.', 45, currentY + 145)
+                .text('3. Após o envio, você entrará na fila de aprovação da sua liderança.', 45, currentY + 160);
+
+            doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8).text('ENTREGUE PARA (NOME):', 395, currentY + 45);
+            doc.moveTo(395, currentY + 65).lineTo(545, currentY + 65).strokeColor('#cbd5e1').lineWidth(1).stroke();
+
+            doc.image(publicQrBuffer, 415, currentY + 80, { width: 110 });
+            doc.link(415, currentY + 80, 110, 110, publicUrl);
+
+            doc.font('Helvetica').fontSize(8).fillColor('#94a3b8')
+                .text(`Token: ${leader.id.substring(0, 8).toUpperCase()}`, 395, currentY + 200, { align: 'center', width: 150 });
+        }
+
+        doc.end();
+        return doc;
     }
 }

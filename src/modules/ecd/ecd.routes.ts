@@ -9,6 +9,7 @@ export async function ecdRoutes(app: FastifyInstance) {
   app.post('/public/register', (req, rep) => ecdController.register(req, rep));
   app.get('/public/validate-token/:token', (req, rep) => ecdController.validateToken(req as any, rep));
   app.post('/public/validate-pin', (req, rep) => ecdController.validatePinPublic(req, rep));
+  app.get('/public/leaders', (req, rep) => ecdController.getLeaders(req, rep));
 
   // === ROTAS PRIVADAS (Requer Login no Painel) ===
   app.register(async function privateRoutes(childApp) {

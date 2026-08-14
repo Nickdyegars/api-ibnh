@@ -3,6 +3,7 @@ import { WorkerAreaType, WorkerLeaderType, RegisterWorkerType } from './ecd-work
 import { deleteImage } from '../../shared/storage/minio.js';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
+import sharp from 'sharp';
 
 export class EcdWorkersService {
 
@@ -545,6 +546,224 @@ export class EcdWorkersService {
 
             doc.font('Helvetica').fontSize(8).fillColor('#94a3b8')
                 .text(`Token: ${leader.id.substring(0, 8).toUpperCase()}`, 395, currentY + 200, { align: 'center', width: 150 });
+        }
+
+        doc.end();
+        return doc;
+    }
+
+    // ==========================================
+    // RELATÓRIO DE TRABALHADORES (COM GRÁFICO E LISTA DINÂMICA)
+    // ==========================================
+    async generateTrabalhadoresPdf() {
+        // 1. Busca a edição atual
+        const currentEdition = await prisma.ecdEdition.findFirst({
+            orderBy: { created_at: 'desc' }
+        });
+
+        if (!currentEdition) {
+            throw new Error("Nenhuma edição ativa encontrada.");
+        }
+
+        // 2. Busca APENAS os trabalhadores APROVADOS nesta edição
+        let trabalhadores = await prisma.ecdWorkerRegistration.findMany({
+            where: {
+                edition_id: currentEdition.id,
+                status: 'APROVADO'
+            },
+            include: {
+                area: true,
+                leader: true
+            }
+        });
+
+        if (trabalhadores.length === 0) {
+            throw new Error("Nenhum voluntário aprovado encontrado para esta edição.");
+        }
+
+        // 3. ORDENAÇÃO ALFABÉTICA ABSOLUTA
+        trabalhadores.sort((a, b) => {
+            const nomeA = a.full_name || '';
+            const nomeB = b.full_name || '';
+            return nomeA.localeCompare(nomeB, 'pt-BR', { sensitivity: 'base' });
+        });
+
+        // ==========================================
+        // CÁLCULO DE DEMOGRAFIA PARA O GRÁFICO
+        // ==========================================
+        let totalHomens = 0;
+        let totalMulheres = 0;
+        trabalhadores.forEach(w => {
+            if (w.gender === 'M') totalHomens++;
+            else totalMulheres++; // Assume 'F' para o restante
+        });
+        const total = trabalhadores.length;
+        const pctHomens = (totalHomens / total) * 100;
+        const pctMulheres = (totalMulheres / total) * 100;
+
+        // 4. Prepara o Documento PDF
+        const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+        // Gráfico de Barras Horizontal
+        const drawDemographicsChart = () => {
+            doc.moveDown(1);
+            const startX = 40;
+            let currentY = doc.y;
+
+            doc.fillColor('#334155').font('Helvetica-Bold').fontSize(9)
+                .text('Proporção de Gênero na Equipe:', startX, currentY);
+
+            currentY += 15;
+            const barWidth = 515;
+            const barHeight = 12;
+            const widthHomens = (totalHomens / total) * barWidth || 0;
+            const widthMulheres = (totalMulheres / total) * barWidth || 0;
+
+            // Barra Masculina (Azul)
+            if (widthHomens > 0) doc.rect(startX, currentY, widthHomens, barHeight).fill('#3b82f6');
+            // Barra Feminina (Rosa)
+            if (widthMulheres > 0) doc.rect(startX + widthHomens, currentY, widthMulheres, barHeight).fill('#ec4899');
+
+            currentY += 16;
+
+            // Labels de Porcentagem
+            doc.fillColor('#3b82f6').font('Helvetica-Bold').fontSize(8)
+                .text(`Masculino: ${totalHomens} (${pctHomens.toFixed(1)}%)`, startX, currentY);
+
+            doc.fillColor('#ec4899')
+                .text(`Feminino: ${totalMulheres} (${pctMulheres.toFixed(1)}%)`, startX + widthHomens - 120, currentY, { align: 'right', width: 120 });
+
+            doc.moveDown(2);
+        };
+
+        // Cabeçalho da Página (Título)
+        const drawPageTitle = (isFirstPage = false) => {
+            doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(16)
+                .text(`RELAÇÃO DE TRABALHADORES APROVADOS - ${currentEdition.name.toUpperCase()}`, 40, 40, { align: 'center', width: 515 });
+            doc.fontSize(10).font('Helvetica').fillColor('#64748b')
+                .text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} | Equipe Total: ${total}`, 40, 60, { align: 'center', width: 515 });
+
+            if (isFirstPage) {
+                drawDemographicsChart();
+            } else {
+                doc.moveDown(1.5);
+            }
+        };
+
+        // Cabeçalho da Tabela
+        const drawTableHeader = () => {
+            const top = doc.y;
+            doc.rect(40, top, 515, 20).fill('#334155');
+            doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
+                .text('FOTO', 45, top + 6, { width: 55, align: 'center' })
+                .text('DADOS PESSOAIS', 110, top + 6, { width: 140 })
+                .text('ÁREA / LÍDER', 260, top + 6, { width: 110 })
+                .text('CONTATO', 380, top + 6, { width: 75 })
+                .text('ALVO(S)', 465, top + 6, { width: 90 });
+            doc.y = top + 24;
+        };
+
+        // Desenha a primeira página com o gráfico
+        drawPageTitle(true);
+        drawTableHeader();
+
+        for (const worker of trabalhadores) {
+            // ==========================================
+            // CÁLCULO DE ALTURA DINÂMICA DA LINHA
+            // ==========================================
+            // Define a fonte que será usada no texto de alvos para medir com precisão
+            doc.font('Helvetica').fontSize(7);
+
+            let rowHeight = 70; // Altura mínima padrão para caber a foto
+
+            // Se houverem muitos nomes, o PDFKit calcula a altura que o bloco de texto precisará
+            if (worker.bringing_target && worker.target_name) {
+                const textHeight = doc.heightOfString(worker.target_name, { width: 90 });
+                // 28 (posição Y inicial do texto) + altura do texto + 10 (margem de segurança)
+                const neededHeight = 28 + textHeight + 10;
+                if (neededHeight > rowHeight) {
+                    rowHeight = neededHeight;
+                }
+            }
+
+            // Quebra de página se não houver espaço para a altura da linha atual
+            if (doc.y + rowHeight > 780) {
+                doc.addPage();
+                drawPageTitle(false); // Falso para não repetir o gráfico
+                drawTableHeader();
+            }
+
+            const rowY = doc.y;
+
+            // ==========================================
+            // TRATAMENTO DA IMAGEM COM SHARP
+            // ==========================================
+            let imgBuffer: Buffer | null = null;
+            if (worker.profile_photo_url) {
+                try {
+                    const response = await fetch(worker.profile_photo_url);
+                    if (response.ok) {
+                        const arrayBuffer = await response.arrayBuffer();
+                        imgBuffer = await sharp(Buffer.from(arrayBuffer))
+                            .resize(100, 100, { fit: 'cover' })
+                            .jpeg({ quality: 100 })
+                            .toBuffer();
+                    }
+                } catch (err) {
+                    console.warn(`[PDF] Erro ao carregar foto de ${worker.full_name}:`, err);
+                }
+            }
+
+            // ==========================================
+            // DESENHO DA LINHA
+            // ==========================================
+
+            // 1. Coluna: FOTO
+            if (imgBuffer) {
+                doc.image(imgBuffer, 45, rowY + 5, { width: 55, height: 55 });
+                doc.rect(45, rowY + 5, 55, 55).lineWidth(1).strokeColor('#cbd5e1').stroke();
+            } else {
+                doc.rect(45, rowY + 5, 55, 55).lineWidth(1).dash(3, { space: 3 }).strokeColor('#cbd5e1').stroke();
+                doc.undash();
+                doc.fillColor('#94a3b8').fontSize(7).font('Helvetica-Oblique')
+                    .text('SEM FOTO', 45, rowY + 28, { align: 'center', width: 55 });
+            }
+
+            // 2. Coluna: DADOS PESSOAIS
+            doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(9)
+                .text(worker.full_name || '-', 110, rowY + 15, { width: 140, ellipsis: true });
+            doc.fillColor('#64748b').font('Helvetica').fontSize(8)
+                .text(`${worker.age || '-'} anos  |  Sexo: ${worker.gender === 'M' ? 'Masc' : 'Fem'}`, 110, rowY + 28, { width: 140 });
+
+            // 3. Coluna: ÁREA / LÍDER
+            const areaName = worker.area?.name || 'GERAL';
+            const leaderName = worker.leader?.name || 'Líder Não Informado';
+
+            doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(8)
+                .text(areaName.toUpperCase(), 260, rowY + 15, { width: 110, ellipsis: true });
+            doc.fillColor('#334155').font('Helvetica').fontSize(8)
+                .text(leaderName, 260, rowY + 28, { width: 110, ellipsis: true });
+
+            // 4. Coluna: CONTATO
+            doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8)
+                .text(worker.phone || '-', 380, rowY + 20, { width: 75 });
+
+            // 5. Coluna: ALVO(S) (Sem limite de altura e sem reticências)
+            if (worker.bringing_target && worker.target_name) {
+                doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8)
+                    .text('Sim', 465, rowY + 15, { width: 90 });
+                doc.fillColor('#475569').font('Helvetica').fontSize(7)
+                    .text(worker.target_name, 465, rowY + 28, { width: 90 }); // A string inteira será impressa e quebrará linhas
+            } else {
+                doc.fillColor('#94a3b8').font('Helvetica-Oblique').fontSize(8)
+                    .text('Nenhum', 465, rowY + 20, { width: 90 });
+            }
+
+            // Linha divisória inferior adaptada para abraçar todo o texto
+            doc.moveTo(40, rowY + rowHeight).lineTo(555, rowY + rowHeight).strokeColor('#e2e8f0').lineWidth(1).stroke();
+
+            // Avança o Y pela altura dinâmica recalculada
+            doc.y = rowY + rowHeight;
         }
 
         doc.end();

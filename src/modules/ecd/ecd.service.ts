@@ -4,6 +4,7 @@ import { uploadImage, deleteImage } from '../../shared/storage/minio.js';
 import crypto from 'crypto';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
+import sharp from 'sharp';
 
 function generateShortCode(length = 5): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -460,8 +461,8 @@ export class EcdService {
         worker_slots: data.workerSlots,
         encontristaPaymentLink: data.encontristaPaymentLink ?? null,
         workerPaymentLink: data.workerPaymentLink ?? null,
-        priceTotal: data.priceTotal ?? null, 
-        priceSignal: data.priceSignal ?? null, 
+        priceTotal: data.priceTotal ?? null,
+        priceSignal: data.priceSignal ?? null,
         workerPrice: data.workerPrice ?? null,
         startDate: data.startDate ? new Date(data.startDate) : null,
         endDate: data.endDate ? new Date(data.endDate) : null,
@@ -1110,6 +1111,205 @@ export class EcdService {
         doc.moveTo(40, rowY + 12).lineTo(555, rowY + 12).strokeColor('#f1f5f9').lineWidth(0.5).stroke();
         doc.y = rowY + 16;
       });
+    }
+
+    doc.end();
+    return doc;
+  }
+
+  // ==========================================
+  // RELATÓRIO DE ENCONTRISTAS (LISTA COM FOTOS)
+  // ==========================================
+  async generateEncontristasPdf() {
+    // 1. Busca a edição atual
+    const currentEdition = await prisma.ecdEdition.findFirst({
+      orderBy: { created_at: 'desc' }
+    });
+
+    if (!currentEdition) {
+      throw new Error("Nenhuma edição ativa encontrada.");
+    }
+
+    // 2. Busca APENAS os encontristas APROVADOS (Ativos ou Concluídos)
+    let encontristas = await prisma.ecdRegistration.findMany({
+      where: {
+        edition_id: currentEdition.id,
+        status: { in: ['ATIVO', 'CONCLUIDO'] }
+      },
+      include: {
+        leader: { include: { cell: true } }
+      }
+    });
+
+    if (encontristas.length === 0) {
+      throw new Error("Nenhum encontrista aprovado encontrado para esta edição.");
+    }
+
+    // 3. ORDENAÇÃO ALFABÉTICA ABSOLUTA (Ignora Maiúsculas/Minúsculas e Acentos)
+    encontristas.sort((a, b) => {
+      const nomeA = a.full_name || '';
+      const nomeB = b.full_name || '';
+      return nomeA.localeCompare(nomeB, 'pt-BR', { sensitivity: 'base' });
+    });
+
+    // ==========================================
+    // CÁLCULO DE DEMOGRAFIA PARA O GRÁFICO
+    // ==========================================
+    let totalHomens = 0;
+    let totalMulheres = 0;
+    encontristas.forEach(e => {
+      if (e.gender === 'M') totalHomens++;
+      else totalMulheres++; // Assume 'F' para o restante
+    });
+    const total = encontristas.length;
+    const pctHomens = (totalHomens / total) * 100;
+    const pctMulheres = (totalMulheres / total) * 100;
+
+    // 4. Prepara o Documento PDF
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+    // Gráfico de Barras Horizontal
+    const drawDemographicsChart = () => {
+      doc.moveDown(1);
+      const startX = 40;
+      let currentY = doc.y;
+
+      doc.fillColor('#334155').font('Helvetica-Bold').fontSize(9)
+        .text('Proporção de Gênero dos Encontristas:', startX, currentY);
+
+      currentY += 15;
+      const barWidth = 515;
+      const barHeight = 12;
+      const widthHomens = (totalHomens / total) * barWidth || 0;
+      const widthMulheres = (totalMulheres / total) * barWidth || 0;
+
+      // Barra Masculina (Azul)
+      if (widthHomens > 0) doc.rect(startX, currentY, widthHomens, barHeight).fill('#3b82f6');
+      // Barra Feminina (Rosa)
+      if (widthMulheres > 0) doc.rect(startX + widthHomens, currentY, widthMulheres, barHeight).fill('#ec4899');
+
+      currentY += 16;
+
+      // Labels de Porcentagem
+      doc.fillColor('#3b82f6').font('Helvetica-Bold').fontSize(8)
+        .text(`Masculino: ${totalHomens} (${pctHomens.toFixed(1)}%)`, startX, currentY);
+
+      doc.fillColor('#ec4899')
+        .text(`Feminino: ${totalMulheres} (${pctMulheres.toFixed(1)}%)`, startX + widthHomens - 120, currentY, { align: 'right', width: 120 });
+
+      doc.moveDown(2);
+    };
+
+    // Cabeçalho da Página (Título)
+    const drawPageTitle = (isFirstPage = false) => {
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(16)
+        .text(`RELAÇÃO DE ENCONTRISTAS APROVADOS - ${currentEdition.name.toUpperCase()}`, 40, 40, { align: 'center', width: 515 });
+      doc.fontSize(10).font('Helvetica').fillColor('#64748b')
+        .text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} | Total: ${total}`, 40, 60, { align: 'center', width: 515 });
+
+      if (isFirstPage) {
+        drawDemographicsChart();
+      } else {
+        doc.moveDown(1.5);
+      }
+    };
+
+    // Cabeçalho da Tabela
+    const drawTableHeader = () => {
+      const top = doc.y;
+      doc.rect(40, top, 515, 20).fill('#334155');
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
+        .text('FOTO', 55, top + 6, { width: 50 })
+        .text('DADOS PESSOAIS', 120, top + 6, { width: 160 })
+        .text('ORIGEM / LÍDER', 290, top + 6, { width: 120 })
+        .text('CONTATO', 420, top + 6, { width: 80 })
+        .text('FICHA', 510, top + 6, { width: 45 });
+      doc.y = top + 24;
+    };
+
+    // Desenha a primeira página com o gráfico
+    drawPageTitle(true);
+    drawTableHeader();
+
+    const rowHeight = 70; // Altura de cada linha para caber a foto
+
+    for (const e of encontristas) {
+
+      // Quebra de página se não houver espaço para a próxima linha
+      if (doc.y + rowHeight > 780) {
+        doc.addPage();
+        drawPageTitle(false); // Falso para não repetir o gráfico
+        drawTableHeader();
+      }
+
+      const rowY = doc.y;
+
+      // ==========================================
+      // TRATAMENTO DA IMAGEM COM SHARP (BLINDADO)
+      // ==========================================
+      let imgBuffer: Buffer | null = null;
+      if (e.profile_photo_url) {
+        try {
+          const response = await fetch(e.profile_photo_url);
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+
+            // Pega a imagem bruta, corta num quadrado perfeito 100x100 para manter a máxima nitidez
+            imgBuffer = await sharp(Buffer.from(arrayBuffer))
+              .resize(100, 100, { fit: 'cover' })
+              .jpeg({ quality: 100 })
+              .toBuffer();
+          }
+        } catch (err) {
+          console.warn(`[PDF] Erro ao carregar/converter foto de ${e.full_name}:`, err);
+        }
+      }
+
+      // ==========================================
+      // DESENHO DA LINHA DA TABELA
+      // ==========================================
+
+      // 1. Coluna: FOTO
+      if (imgBuffer) {
+        doc.image(imgBuffer, 45, rowY + 5, { width: 55, height: 55 });
+        // Borda fininha na foto
+        doc.rect(45, rowY + 5, 55, 55).lineWidth(1).strokeColor('#cbd5e1').stroke();
+      } else {
+        // Placeholder se não tiver foto ou der erro
+        doc.rect(45, rowY + 5, 55, 55).lineWidth(1).dash(3, { space: 3 }).strokeColor('#cbd5e1').stroke();
+        doc.undash();
+        doc.fillColor('#94a3b8').fontSize(7).font('Helvetica-Oblique')
+          .text('SEM FOTO', 45, rowY + 28, { align: 'center', width: 55 });
+      }
+
+      // 2. Coluna: DADOS PESSOAIS
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(9)
+        .text(e.full_name || '-', 120, rowY + 15, { width: 160, ellipsis: true });
+      doc.fillColor('#64748b').font('Helvetica').fontSize(8)
+        .text(`${e.age || '-'} anos  |  Sexo: ${e.gender || '-'}`, 120, rowY + 28, { width: 160 });
+
+      // 3. Coluna: ORIGEM / LÍDER
+      const leaderName = e.leader?.cell?.leader || e.leader?.name || e.cell_leader_name || 'Desconhecido';
+      doc.fillColor('#334155').font('Helvetica').fontSize(8)
+        .text(leaderName, 290, rowY + 20, { width: 120, ellipsis: true });
+
+      // 4. Coluna: CONTATO
+      doc.fillColor('#334155').font('Helvetica').fontSize(8)
+        .text(e.phone || '-', 420, rowY + 20, { width: 80 });
+
+      // 5. Coluna: FICHA (Cor de Fundo)
+      const fichaType = (e.ficha_type || 'N/A').toUpperCase();
+      const colorHex = fichaType === 'AMARELA' ? '#eab308' : '#16a34a';
+
+      doc.rect(510, rowY + 18, 45, 14).fill(colorHex);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7)
+        .text(fichaType, 510, rowY + 22, { align: 'center', width: 45 });
+
+      // Linha divisória no final da row
+      doc.moveTo(40, rowY + rowHeight).lineTo(555, rowY + rowHeight).strokeColor('#e2e8f0').lineWidth(1).stroke();
+
+      // Avança o Y para a próxima iteração
+      doc.y = rowY + rowHeight;
     }
 
     doc.end();

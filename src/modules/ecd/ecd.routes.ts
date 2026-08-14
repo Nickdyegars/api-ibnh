@@ -66,5 +66,7 @@ export async function ecdRoutes(app: FastifyInstance) {
     childApp.get('/tokens/export-codes', (req, rep) => ecdController.exportLeadersPdf(req, rep));
     childApp.get('/tokens/reprint', (req, rep) => ecdController.reprintBatchPdf(req, rep));
     childApp.get('/editions/history-pdf', (req, rep) => ecdController.exportHistoryPdf(req, rep));
+
+    childApp.get('/editions/encontristas-pdf', (req, rep) => ecdController.exportEncontristasPdf(req, rep));
   });
 }

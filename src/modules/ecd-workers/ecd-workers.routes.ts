@@ -169,5 +169,6 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
     childApp.patch('/registrations/:id/payment', (req, rep) => controller.updatePayment(req, rep));
     childApp.delete('/registrations/:id', (req, rep) => controller.deleteRegistration(req, rep));
     childApp.put('/registrations/:id', (req, rep) => controller.updateWorkerData(req, rep));
+    childApp.get('/registrations/report-pdf', (req, rep) => controller.exportTrabalhadoresPdf(req, rep));
   });
 }

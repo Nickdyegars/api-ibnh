@@ -277,4 +277,19 @@ export class EcdWorkersController {
             return reply.status(400).send({ error: error.message });
         }
     }
+
+    async exportTrabalhadoresPdf(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      // Chama o serviço que criamos anteriormente
+      const doc = await service.generateTrabalhadoresPdf();
+
+      reply.header('Content-Type', 'application/pdf');
+      reply.header('Content-Disposition', `inline; filename="equipe_trabalho.pdf"`);
+
+      return reply.send(doc);
+    } catch (error: any) {
+      console.error('[Export Trabalhadores PDF Error]', error);
+      return reply.status(400).send({ success: false, message: error.message });
+    }
+  }
 }

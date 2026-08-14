@@ -286,7 +286,7 @@ export class EcdController {
       return reply.status(500).send({ error: 'Erro ao salvar comprovante' });
     }
   }
-  
+
 
   async transferRegistrationLeader(request: FastifyRequest, reply: FastifyReply) {
     try {
@@ -778,6 +778,22 @@ export class EcdController {
     } catch (error: any) {
       console.error("Erro ao exportar histórico:", error);
       return reply.status(400).send({ error: error.message || "Erro ao gerar PDF do histórico." });
+    }
+  }
+
+  async exportEncontristasPdf(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      // Chama o serviço, que agora descobre a edição atual sozinho!
+      const doc = await ecdService.generateEncontristasPdf();
+
+      reply.header('Content-Type', 'application/pdf');
+      reply.header('Content-Disposition', `inline; filename="encontristas_edicao.pdf"`);
+
+      return reply.send(doc);
+
+    } catch (error: any) {
+      console.error('[Export Encontristas PDF Error]', error);
+      return reply.status(400).send({ success: false, message: error.message });
     }
   }
 }

@@ -457,6 +457,7 @@ model EcdToken {
   isUsed    Boolean   @default(false) @map("is_used")
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  tokenNumber Int?
 
   // 👇 ADICIONE ESTAS DUAS LINHAS: Amarra a ficha à edição!
   editionId String?     @map("edition_id") @db.Uuid

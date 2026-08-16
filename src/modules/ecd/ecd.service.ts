@@ -239,7 +239,8 @@ export class EcdService {
         leader: {
           include: { cell: true } // Inclui a célula para pegar o nome
         },
-        edition: { select: { name: true } }
+        edition: { select: { name: true } },
+        token: true
       }
     });
   }
@@ -576,6 +577,9 @@ export class EcdService {
   // ==========================================
   // GERAÇÃO DE LOTE E PDF COM TRAVA DE EDIÇÃO
   // ==========================================
+  // ==========================================
+  // GERAÇÃO DE LOTE E PDF COM TRAVA DE EDIÇÃO
+  // ==========================================
   async generateTokensAndPdf(amountYellow: number, amountGreen: number, editionId: string) {
 
     // 1. TRAVA DE SEGURANÇA E LIMITES
@@ -593,15 +597,33 @@ export class EcdService {
       throw new Error(`Limite excedido! A edição permite ${edition.green_slots} verdes. Já imprimimos ${alreadyGreen}. Você só pode gerar mais ${edition.green_slots - alreadyGreen}.`);
     }
 
-    // 2. GERAÇÃO DOS TOKENS (USO ÚNICO)
-    const tokensToCreate: { id: string; shortCode: string; tokenType: string; isUsed: boolean; editionId?: string; }[] = [];
+    // 2. GERAÇÃO DOS TOKENS COM O NÚMERO SALVO NO BANCO
+    const tokensToCreate: any[] = [];
 
+    let yellowCounter = alreadyYellow;
     for (let i = 0; i < amountYellow; i++) {
-      tokensToCreate.push({ id: crypto.randomUUID(), shortCode: generateShortCode(5), tokenType: 'AMARELA', isUsed: false, editionId: editionId });
+      yellowCounter++;
+      tokensToCreate.push({
+        id: crypto.randomUUID(),
+        shortCode: generateShortCode(5),
+        tokenType: 'AMARELA',
+        isUsed: false,
+        editionId: editionId,
+        tokenNumber: yellowCounter // 👈 Salva o número no banco
+      });
     }
 
+    let greenCounter = alreadyGreen;
     for (let i = 0; i < amountGreen; i++) {
-      tokensToCreate.push({ id: crypto.randomUUID(), shortCode: generateShortCode(5), tokenType: 'VERDE', isUsed: false, editionId: editionId });
+      greenCounter++;
+      tokensToCreate.push({
+        id: crypto.randomUUID(),
+        shortCode: generateShortCode(5),
+        tokenType: 'VERDE',
+        isUsed: false,
+        editionId: editionId,
+        tokenNumber: greenCounter // 👈 Salva o número no banco
+      });
     }
 
     await prisma.ecdToken.createMany({ data: tokensToCreate, skipDuplicates: true });
@@ -617,8 +639,7 @@ export class EcdService {
     const startY = 40;
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
 
-    let currentYellowNumber = alreadyYellow;
-    let currentGreenNumber = alreadyGreen;
+    // 👇 AS VARIÁVEIS ANTIGAS FORAM REMOVIDAS DAQUI 👇
 
     for (let index = 0; index < tokensToCreate.length; index++) {
       const token = tokensToCreate[index];
@@ -629,14 +650,8 @@ export class EcdService {
       const currentY = startY + (index % 3) * rowHeight;
       const colorHex = token.tokenType === 'AMARELA' ? '#eab308' : '#16a34a';
 
-      let seqNumber = 0;
-      if (token.tokenType === 'AMARELA') {
-        currentYellowNumber++;
-        seqNumber = currentYellowNumber;
-      } else {
-        currentGreenNumber++;
-        seqNumber = currentGreenNumber;
-      }
+      // 👇 AGORA O PDF PEGA O NÚMERO DIRETAMENTE DO OBJETO SALVO 👇
+      const seqNumber = token.tokenNumber;
 
       // Borda Externa do Ingresso
       doc.rect(30, currentY, 535, 210).strokeColor('#cbd5e1').lineWidth(1).stroke();
@@ -645,9 +660,9 @@ export class EcdService {
       doc.rect(30, currentY, 535, 35).fill(colorHex);
       doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType} Nº ${seqNumber}`, 45, currentY + 12);
 
-      // 👇 DIVISÓRIA VERTICAL DO TICKET (Estilo Canhoto) 👇
+      // DIVISÓRIA VERTICAL DO TICKET (Estilo Canhoto)
       doc.moveTo(380, currentY + 35).lineTo(380, currentY + 240).strokeColor('#e2e8f0').lineWidth(1).dash(5, { space: 5 }).stroke();
-      doc.undash(); // Evita que as outras linhas fiquem tracejadas
+      doc.undash();
 
       // ==========================================
       // LADO ESQUERDO: INFORMAÇÕES E INSTRUÇÕES
@@ -1314,5 +1329,69 @@ export class EcdService {
 
     doc.end();
     return doc;
+  }
+
+  // ==========================================
+  // BUSCA DE FICHA PELO ID DE SEGURANÇA (CÓDIGO CURTO)
+  // ==========================================
+  // ==========================================
+  // BUSCA DE FICHA PELO ID IMPRESSO NO RODAPÉ
+  // ==========================================
+  async findRegistrationByShortCode(shortCode: string) {
+    const token = await prisma.ecdToken.findUnique({
+      where: { shortCode: shortCode.toUpperCase() },
+      include: {
+        registration: {
+          include: {
+            leader: { include: { cell: true } }
+          }
+        }
+      }
+    });
+
+    if (!token) {
+      throw new Error(`Nenhuma ficha encontrada com o ID '${shortCode.toUpperCase()}'. Verifique as letras no rodapé da ficha física.`);
+    }
+
+    if (!token.isUsed || !token.registration) {
+      return {
+        status: 'NAO_USADA',
+        message: `A ficha ${token.tokenType} (ID: ${token.shortCode}) ainda não foi preenchida ou vinculada a um encontrista.`,
+      };
+    }
+
+    return {
+      status: 'USADA',
+      registration: token.registration,
+      tokenType: token.tokenType
+    };
+  }
+
+  // ==========================================
+  // BUSCA EXATA PELO NÚMERO SALVO NO BANCO
+  // ==========================================
+  async findRegistrationByTokenNumber(editionId: string, tokenType: string, tokenNumber: number) {
+    const token = await prisma.ecdToken.findFirst({
+      where: {
+        editionId: editionId,
+        tokenType: tokenType.toUpperCase(),
+        tokenNumber: tokenNumber // 👈 Busca exatamente pela coluna nova
+      },
+      include: {
+        registration: {
+          include: { leader: { include: { cell: true } } }
+        }
+      }
+    });
+
+    if (!token) {
+      throw new Error(`A ficha ${tokenType} Nº ${tokenNumber} não existe no banco de dados. (Lembre-se: Fichas antigas só podem ser achadas pelo Código).`);
+    }
+
+    if (!token.isUsed || !token.registration) {
+      return { status: 'NAO_USADA', message: `A ficha ${tokenType} Nº ${tokenNumber} ainda está em branco.` };
+    }
+
+    return { status: 'USADA', registration: token.registration, tokenType: token.tokenType };
   }
 }

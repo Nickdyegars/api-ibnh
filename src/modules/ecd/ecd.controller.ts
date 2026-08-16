@@ -796,4 +796,34 @@ export class EcdController {
       return reply.status(400).send({ success: false, message: error.message });
     }
   }
+
+  // ==========================================
+  // BUSCA DE FICHA PELO NÚMERO IMPRESSO
+  // ==========================================
+  async searchRegistrationByShortCode(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { shortCode } = request.query as { shortCode: string };
+
+      if (!shortCode) {
+        return reply.status(400).send({ error: "O ID da ficha é obrigatório." });
+      }
+
+      const result = await ecdService.findRegistrationByShortCode(shortCode);
+      return reply.send(result);
+    } catch (error: any) {
+      console.error('[Search Ficha Error]', error);
+      return reply.status(400).send({ error: error.message });
+    }
+  }
+  async searchRegistrationByTokenNumber(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { editionId, tokenType, tokenNumber } = request.query as any;
+      if (!editionId || !tokenType || !tokenNumber) return reply.status(400).send({ error: "Faltam parâmetros." });
+      
+      const result = await ecdService.findRegistrationByTokenNumber(editionId, tokenType, parseInt(tokenNumber, 10));
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  }
 }

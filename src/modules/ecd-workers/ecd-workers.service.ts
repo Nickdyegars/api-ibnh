@@ -769,4 +769,150 @@ export class EcdWorkersService {
         doc.end();
         return doc;
     }
+    // ==========================================
+    // RELATÓRIO DE TRABALHADORES EM FILA DE ESPERA (COM FOTOS)
+    // ==========================================
+    async generateTrabalhadoresPendentesPdf(editionId?: string) {
+        const currentEdition = editionId
+            ? await prisma.ecdEdition.findUnique({ where: { id: editionId } })
+            : await prisma.ecdEdition.findFirst({ orderBy: { created_at: 'desc' } });
+
+        if (!currentEdition) throw new Error("Nenhuma edição encontrada.");
+
+        let trabalhadoresPendentes = await prisma.ecdWorkerRegistration.findMany({
+            where: {
+                edition_id: currentEdition.id,
+                status: 'PENDENTE'
+            },
+            include: {
+                area: true,
+                leader: true
+            }
+        });
+
+        if (trabalhadoresPendentes.length === 0) {
+            throw new Error("A Fila de Espera de trabalhadores está vazia para esta edição.");
+        }
+
+        // Ordenação Alfabética Absoluta
+        trabalhadoresPendentes.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'pt-BR', { sensitivity: 'base' }));
+
+        // Cálculos de Demografia
+        let totalHomens = 0;
+        let totalMulheres = 0;
+        trabalhadoresPendentes.forEach(t => { if (t.gender === 'M') totalHomens++; else totalMulheres++; });
+        const total = trabalhadoresPendentes.length;
+        const pctHomens = (totalHomens / total) * 100;
+        const pctMulheres = (totalMulheres / total) * 100;
+
+        const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+        // Desenho do Gráfico de Proporção
+        const drawDemographicsChart = () => {
+            doc.moveDown(1);
+            const startX = 40; let currentY = doc.y;
+            doc.fillColor('#334155').font('Helvetica-Bold').fontSize(9).text('Proporção de Gênero (Trabalhadores Pendentes):', startX, currentY);
+            currentY += 15;
+            const barWidth = 515; const barHeight = 12;
+            const widthHomens = (totalHomens / total) * barWidth || 0;
+            const widthMulheres = (totalMulheres / total) * barWidth || 0;
+
+            if (widthHomens > 0) doc.rect(startX, currentY, widthHomens, barHeight).fill('#3b82f6');
+            if (widthMulheres > 0) doc.rect(startX + widthHomens, currentY, widthMulheres, barHeight).fill('#ec4899');
+            currentY += 16;
+            doc.fillColor('#3b82f6').font('Helvetica-Bold').fontSize(8).text(`Masculino: ${totalHomens} (${pctHomens.toFixed(1)}%)`, startX, currentY);
+            doc.fillColor('#ec4899').text(`Feminino: ${totalMulheres} (${pctMulheres.toFixed(1)}%)`, startX + widthHomens - 120, currentY, { align: 'right', width: 120 });
+            doc.moveDown(2);
+        };
+
+        const drawPageTitle = (isFirstPage = false) => {
+            doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(16)
+                .text(`TRABALHADORES NA FILA DE ESPERA - ${currentEdition.name.toUpperCase()}`, 40, 40, { align: 'center', width: 515 });
+            doc.fontSize(10).font('Helvetica').fillColor('#64748b')
+                .text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} | Total na fila: ${total}`, 40, 60, { align: 'center', width: 515 });
+
+            if (isFirstPage) drawDemographicsChart(); else doc.moveDown(1.5);
+        };
+
+        const drawTableHeader = () => {
+            const top = doc.y;
+            doc.rect(40, top, 515, 20).fill('#475569');
+            doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
+                .text('FOTO', 45, top + 6, { width: 55, align: 'center' }) // 👈 Espaço para a foto
+                .text('DADOS PESSOAIS', 110, top + 6, { width: 140 })
+                .text('WHATSAPP', 260, top + 6, { width: 80 })
+                .text('ÁREA / SETOR', 350, top + 6, { width: 110 })
+                .text('PAGAMENTO', 470, top + 6, { width: 80 });
+            doc.y = top + 24;
+        };
+
+        drawPageTitle(true);
+        drawTableHeader();
+
+        for (const t of trabalhadoresPendentes) {
+            const rowHeight = 70; // 👈 Altura ajustada para caber a fotografia
+
+            if (doc.y + rowHeight > 780) { doc.addPage(); drawPageTitle(false); drawTableHeader(); }
+            const rowY = doc.y;
+
+            // ==========================================
+            // TRATAMENTO DA IMAGEM COM SHARP
+            // ==========================================
+            let imgBuffer: Buffer | null = null;
+            if (t.profile_photo_url) {
+                try {
+                    const response = await fetch(t.profile_photo_url);
+                    if (response.ok) {
+                        const arrayBuffer = await response.arrayBuffer();
+                        imgBuffer = await sharp(Buffer.from(arrayBuffer))
+                            .resize(100, 100, { fit: 'cover' })
+                            .jpeg({ quality: 100 })
+                            .toBuffer();
+                    }
+                } catch (err) {
+                    console.warn(`[PDF] Erro ao carregar foto de ${t.full_name}:`, err);
+                }
+            }
+
+            // 1. DESENHA A FOTOGRAFIA OU PLACEHOLDER
+            if (imgBuffer) {
+                doc.image(imgBuffer, 45, rowY + 5, { width: 55, height: 55 });
+                doc.rect(45, rowY + 5, 55, 55).lineWidth(1).strokeColor('#cbd5e1').stroke();
+            } else {
+                doc.rect(45, rowY + 5, 55, 55).lineWidth(1).dash(3, { space: 3 }).strokeColor('#cbd5e1').stroke();
+                doc.undash();
+                doc.fillColor('#94a3b8').fontSize(7).font('Helvetica-Oblique')
+                    .text('SEM FOTO', 45, rowY + 28, { align: 'center', width: 55 });
+            }
+
+            // 2. DADOS PESSOAIS
+            doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(9)
+                .text(t.full_name || '-', 110, rowY + 15, { width: 140, ellipsis: true });
+            doc.fillColor('#64748b').font('Helvetica').fontSize(8)
+                .text(`${t.age || '-'} anos  |  Sexo: ${t.gender === 'M' ? 'Masc' : 'Fem'}`, 110, rowY + 28, { width: 140 });
+
+            // 3. WHATSAPP
+            doc.fillColor('#334155').font('Helvetica').fontSize(8)
+                .text(t.phone || '-', 260, rowY + 20, { width: 80 });
+
+            // 4. ÁREA / SETOR
+            const areaName = t.area?.name || 'A definir';
+            const leaderName = t.leader?.name || '';
+            const setorText = leaderName ? `${areaName}\n(${leaderName})` : areaName; // Com quebra de linha para ficar mais limpo
+
+            doc.fillColor('#334155').font('Helvetica').fontSize(8)
+                .text(setorText, 350, rowY + 15, { width: 110, ellipsis: true });
+
+            // 5. PAGAMENTO
+            const pStatus = (t.payment_status || 'PENDENTE').toUpperCase();
+            doc.fillColor(pStatus === 'PAGO' ? '#15803d' : '#b91c1c').font('Helvetica-Bold').fontSize(8)
+                .text(pStatus, 470, rowY + 20, { width: 80 });
+
+            doc.moveTo(40, rowY + rowHeight).lineTo(555, rowY + rowHeight).strokeColor('#e2e8f0').lineWidth(1).stroke();
+            doc.y = rowY + rowHeight;
+        }
+
+        doc.end();
+        return doc;
+    }
 }

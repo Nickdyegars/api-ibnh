@@ -577,30 +577,40 @@ export class EcdService {
   // ==========================================
   // GERAÇÃO DE LOTE E PDF COM TRAVA DE EDIÇÃO
   // ==========================================
-  // ==========================================
-  // GERAÇÃO DE LOTE E PDF COM TRAVA DE EDIÇÃO
-  // ==========================================
   async generateTokensAndPdf(amountYellow: number, amountGreen: number, editionId: string) {
 
     // 1. TRAVA DE SEGURANÇA E LIMITES
     const edition = await prisma.ecdEdition.findUnique({ where: { id: editionId } });
     if (!edition) throw new Error("Edição não encontrada.");
 
-    const alreadyYellow = await prisma.ecdToken.count({ where: { editionId, tokenType: 'AMARELA' } });
-    const alreadyGreen = await prisma.ecdToken.count({ where: { editionId, tokenType: 'VERDE' } });
+    // Conta o total apenas para checar o limite de vagas disponíveis
+    const alreadyYellowCount = await prisma.ecdToken.count({ where: { editionId, tokenType: 'AMARELA' } });
+    const alreadyGreenCount = await prisma.ecdToken.count({ where: { editionId, tokenType: 'VERDE' } });
 
-    if (alreadyYellow + amountYellow > edition.yellow_slots) {
-      throw new Error(`Limite excedido! A edição permite ${edition.yellow_slots} amarelas. Já imprimimos ${alreadyYellow}. Você só pode gerar mais ${edition.yellow_slots - alreadyYellow}.`);
+    if (alreadyYellowCount + amountYellow > edition.yellow_slots) {
+      throw new Error(`Limite excedido! A edição permite ${edition.yellow_slots} amarelas. Já imprimimos ${alreadyYellowCount}. Você só pode gerar mais ${edition.yellow_slots - alreadyYellowCount}.`);
     }
 
-    if (alreadyGreen + amountGreen > edition.green_slots) {
-      throw new Error(`Limite excedido! A edição permite ${edition.green_slots} verdes. Já imprimimos ${alreadyGreen}. Você só pode gerar mais ${edition.green_slots - alreadyGreen}.`);
+    if (alreadyGreenCount + amountGreen > edition.green_slots) {
+      throw new Error(`Limite excedido! A edição permite ${edition.green_slots} verdes. Já imprimimos ${alreadyGreenCount}. Você só pode gerar mais ${edition.green_slots - alreadyGreenCount}.`);
     }
+
+    // 👇 CORREÇÃO AQUI: Busca o MAIOR número já registrado para continuar a sequência corretamente,
+    // garantindo que não existam números duplicados mesmo se fichas antigas forem deletadas.
+    const maxYellowToken = await prisma.ecdToken.aggregate({
+      _max: { tokenNumber: true },
+      where: { editionId, tokenType: 'AMARELA' }
+    });
+
+    const maxGreenToken = await prisma.ecdToken.aggregate({
+      _max: { tokenNumber: true },
+      where: { editionId, tokenType: 'VERDE' }
+    });
 
     // 2. GERAÇÃO DOS TOKENS COM O NÚMERO SALVO NO BANCO
     const tokensToCreate: any[] = [];
 
-    let yellowCounter = alreadyYellow;
+    let yellowCounter = maxYellowToken._max.tokenNumber || 0;
     for (let i = 0; i < amountYellow; i++) {
       yellowCounter++;
       tokensToCreate.push({
@@ -609,11 +619,11 @@ export class EcdService {
         tokenType: 'AMARELA',
         isUsed: false,
         editionId: editionId,
-        tokenNumber: yellowCounter // 👈 Salva o número no banco
+        tokenNumber: yellowCounter // 👈 Salva o número correto no banco
       });
     }
 
-    let greenCounter = alreadyGreen;
+    let greenCounter = maxGreenToken._max.tokenNumber || 0;
     for (let i = 0; i < amountGreen; i++) {
       greenCounter++;
       tokensToCreate.push({
@@ -622,7 +632,7 @@ export class EcdService {
         tokenType: 'VERDE',
         isUsed: false,
         editionId: editionId,
-        tokenNumber: greenCounter // 👈 Salva o número no banco
+        tokenNumber: greenCounter // 👈 Salva o número correto no banco
       });
     }
 
@@ -639,8 +649,6 @@ export class EcdService {
     const startY = 40;
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
 
-    // 👇 AS VARIÁVEIS ANTIGAS FORAM REMOVIDAS DAQUI 👇
-
     for (let index = 0; index < tokensToCreate.length; index++) {
       const token = tokensToCreate[index];
       if (!token) continue;
@@ -650,7 +658,7 @@ export class EcdService {
       const currentY = startY + (index % 3) * rowHeight;
       const colorHex = token.tokenType === 'AMARELA' ? '#eab308' : '#16a34a';
 
-      // 👇 AGORA O PDF PEGA O NÚMERO DIRETAMENTE DO OBJETO SALVO 👇
+      // O PDF pega o número diretamente do objeto que acabou de ser gerado e será salvo no banco
       const seqNumber = token.tokenNumber;
 
       // Borda Externa do Ingresso
@@ -808,51 +816,28 @@ export class EcdService {
     const edition = await prisma.ecdEdition.findUnique({ where: { id: editionId } });
     if (!edition) throw new Error("Edição não encontrada.");
 
-    // 2. Busca TODAS as fichas da edição em ordem de criação para descobrirmos o número original
-    const allTokens = await prisma.ecdToken.findMany({
-      where: { editionId: editionId },
+    // 2. Busca APENAS as fichas NÃO UTILIZADAS, ordenando por Tipo (Cor) e pelo Número salvo no banco
+    const tokensToPrint = await prisma.ecdToken.findMany({
+      where: {
+        editionId: editionId,
+        isUsed: false
+      },
       orderBy: [
-        { createdAt: 'asc' },
-        { id: 'asc' }
+        { tokenType: 'asc' },   // Agrupa: AMARELA primeiro, VERDE depois
+        { tokenNumber: 'asc' }  // Ordena os números: 1, 2, 3...
       ]
     });
 
-    if (allTokens.length === 0) {
-      throw new Error("Não existem fichas geradas para esta edição.");
-    }
-
-    // 3. Filtra apenas as que não foram usadas, mas já "carimbadas" com o número original delas
-    const tokensToPrint: any[] = [];
-    let countYellow = 0;
-    let countGreen = 0;
-
-    for (const token of allTokens) {
-      let originalNumber = 0;
-      if (token.tokenType === 'AMARELA') {
-        countYellow++;
-        originalNumber = countYellow;
-      } else if (token.tokenType === 'VERDE') {
-        countGreen++;
-        originalNumber = countGreen;
-      }
-
-      if (token.isUsed === false) {
-        tokensToPrint.push({ ...token, originalNumber });
-      }
-    }
-
     if (tokensToPrint.length === 0) {
-      throw new Error("Todas as fichas impressas desta edição já foram utilizadas!");
+      throw new Error("Todas as fichas impressas desta edição já foram utilizadas ou nenhuma ficha foi gerada!");
     }
 
-    tokensToPrint.sort((a, b) => a.tokenType.localeCompare(b.tokenType));
-
-    // 4. PREPARAÇÃO DOS DADOS FORMATADOS
+    // 3. PREPARAÇÃO DOS DADOS FORMATADOS
     const eventDate = formatEventPeriod(edition.startDate, edition.endDate);
     const totalStr = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(edition.priceTotal || 100);
     const signalStr = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(edition.priceSignal || 50);
 
-    // 5. DESENHO DO PDF
+    // 4. DESENHO DO PDF
     const doc = new PDFDocument({ size: 'A4', margin: 30 });
     const rowHeight = 230;
     const startY = 40;
@@ -867,12 +852,15 @@ export class EcdService {
       const currentY = startY + (index % 3) * rowHeight;
       const colorHex = token.tokenType === 'AMARELA' ? '#eab308' : '#16a34a';
 
+      // 👇 Pega o número real que já está salvo no banco de dados 👇
+      const seqNumber = token.tokenNumber;
+
       // Borda Externa
       doc.rect(30, currentY, 535, 210).strokeColor('#cbd5e1').lineWidth(1).stroke();
 
       // Faixa Superior Colorida (COM AVISO DE REIMPRESSÃO)
       doc.rect(30, currentY, 535, 35).fill(colorHex);
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType} Nº ${token.originalNumber} (REIMPRESSÃO)`, 45, currentY + 12);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14).text(`ENCONTRO COM DEUS - FICHA ${token.tokenType} Nº ${seqNumber} (REIMPRESSÃO)`, 45, currentY + 12);
 
       // Divisória Tracejada
       doc.moveTo(380, currentY + 35).lineTo(380, currentY + 240).strokeColor('#e2e8f0').lineWidth(1).dash(5, { space: 5 }).stroke();
@@ -1332,9 +1320,6 @@ export class EcdService {
   }
 
   // ==========================================
-  // BUSCA DE FICHA PELO ID DE SEGURANÇA (CÓDIGO CURTO)
-  // ==========================================
-  // ==========================================
   // BUSCA DE FICHA PELO ID IMPRESSO NO RODAPÉ
   // ==========================================
   async findRegistrationByShortCode(shortCode: string) {
@@ -1393,5 +1378,126 @@ export class EcdService {
     }
 
     return { status: 'USADA', registration: token.registration, tokenType: token.tokenType };
+  }
+
+  // ==========================================
+  // RELATÓRIO DE FILA DE ESPERA (PENDENTES)
+  // ==========================================
+  async generatePendentesPdf(editionId?: string) {
+    const currentEdition = editionId
+      ? await prisma.ecdEdition.findUnique({ where: { id: editionId } })
+      : await prisma.ecdEdition.findFirst({ orderBy: { created_at: 'desc' } });
+
+    if (!currentEdition) throw new Error("Nenhuma edição encontrada.");
+
+    // Busca APENAS os PENDENTES
+    let pendentes = await prisma.ecdRegistration.findMany({
+      where: {
+        edition_id: currentEdition.id,
+        status: 'PENDENTE'
+      },
+      include: { leader: { include: { cell: true } } }
+    });
+
+    if (pendentes.length === 0) {
+      throw new Error("A Fila de Espera está vazia para esta edição.");
+    }
+
+    // Ordenação Alfabética
+    pendentes.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'pt-BR', { sensitivity: 'base' }));
+
+    // Cálculos para o gráfico
+    let totalHomens = 0;
+    let totalMulheres = 0;
+    pendentes.forEach(e => { if (e.gender === 'M') totalHomens++; else totalMulheres++; });
+    const total = pendentes.length;
+    const pctHomens = (totalHomens / total) * 100;
+    const pctMulheres = (totalMulheres / total) * 100;
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+    const drawDemographicsChart = () => {
+      doc.moveDown(1);
+      const startX = 40; let currentY = doc.y;
+      doc.fillColor('#334155').font('Helvetica-Bold').fontSize(9).text('Proporção de Gênero (Fila de Espera):', startX, currentY);
+      currentY += 15;
+      const barWidth = 515; const barHeight = 12;
+      const widthHomens = (totalHomens / total) * barWidth || 0;
+      const widthMulheres = (totalMulheres / total) * barWidth || 0;
+
+      if (widthHomens > 0) doc.rect(startX, currentY, widthHomens, barHeight).fill('#3b82f6');
+      if (widthMulheres > 0) doc.rect(startX + widthHomens, currentY, widthMulheres, barHeight).fill('#ec4899');
+      currentY += 16;
+      doc.fillColor('#3b82f6').font('Helvetica-Bold').fontSize(8).text(`Masculino: ${totalHomens} (${pctHomens.toFixed(1)}%)`, startX, currentY);
+      doc.fillColor('#ec4899').text(`Feminino: ${totalMulheres} (${pctMulheres.toFixed(1)}%)`, startX + widthHomens - 120, currentY, { align: 'right', width: 120 });
+      doc.moveDown(2);
+    };
+
+    const drawPageTitle = (isFirstPage = false) => {
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(16)
+        .text(`FILA DE ESPERA (PENDENTES) - ${currentEdition.name.toUpperCase()}`, 40, 40, { align: 'center', width: 515 });
+      doc.fontSize(10).font('Helvetica').fillColor('#64748b')
+        .text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} | Total na fila: ${total}`, 40, 60, { align: 'center', width: 515 });
+
+      if (isFirstPage) drawDemographicsChart(); else doc.moveDown(1.5);
+    };
+
+    const drawTableHeader = () => {
+      const top = doc.y;
+      doc.rect(40, top, 515, 20).fill('#334155');
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
+        .text('FOTO', 55, top + 6, { width: 50 })
+        .text('DADOS PESSOAIS', 120, top + 6, { width: 160 })
+        .text('ORIGEM / LÍDER', 290, top + 6, { width: 120 })
+        .text('CONTATO', 420, top + 6, { width: 80 })
+        .text('FICHA', 510, top + 6, { width: 45 });
+      doc.y = top + 24;
+    };
+
+    drawPageTitle(true);
+    drawTableHeader();
+    const rowHeight = 70;
+
+    for (const e of pendentes) {
+      if (doc.y + rowHeight > 780) { doc.addPage(); drawPageTitle(false); drawTableHeader(); }
+      const rowY = doc.y;
+
+      let imgBuffer: Buffer | null = null;
+      if (e.profile_photo_url) {
+        try {
+          const response = await fetch(e.profile_photo_url);
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            imgBuffer = await sharp(Buffer.from(arrayBuffer)).resize(100, 100, { fit: 'cover' }).jpeg({ quality: 100 }).toBuffer();
+          }
+        } catch (err) { }
+      }
+
+      if (imgBuffer) {
+        doc.image(imgBuffer, 45, rowY + 5, { width: 55, height: 55 });
+        doc.rect(45, rowY + 5, 55, 55).lineWidth(1).strokeColor('#cbd5e1').stroke();
+      } else {
+        doc.rect(45, rowY + 5, 55, 55).lineWidth(1).dash(3, { space: 3 }).strokeColor('#cbd5e1').stroke(); doc.undash();
+        doc.fillColor('#94a3b8').fontSize(7).font('Helvetica-Oblique').text('SEM FOTO', 45, rowY + 28, { align: 'center', width: 55 });
+      }
+
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(9).text(e.full_name || '-', 120, rowY + 15, { width: 160, ellipsis: true });
+      doc.fillColor('#64748b').font('Helvetica').fontSize(8).text(`${e.age || '-'} anos  |  Sexo: ${e.gender || '-'}`, 120, rowY + 28, { width: 160 });
+
+      const leaderName = e.leader?.cell?.leader || e.leader?.name || e.cell_leader_name || 'Desconhecido';
+      doc.fillColor('#334155').font('Helvetica').fontSize(8).text(leaderName, 290, rowY + 20, { width: 120, ellipsis: true });
+      doc.fillColor('#334155').font('Helvetica').fontSize(8).text(e.phone || '-', 420, rowY + 20, { width: 80 });
+
+      const fichaType = (e.ficha_type || 'N/A').toUpperCase();
+      const colorHex = fichaType === 'AMARELA' ? '#eab308' : '#16a34a';
+
+      doc.rect(510, rowY + 18, 45, 14).fill(colorHex);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7).text(fichaType, 510, rowY + 22, { align: 'center', width: 45 });
+      doc.moveTo(40, rowY + rowHeight).lineTo(555, rowY + rowHeight).strokeColor('#e2e8f0').lineWidth(1).stroke();
+      doc.y = rowY + rowHeight;
+    }
+
+    doc.end();
+    return doc;
   }
 }

@@ -819,9 +819,23 @@ export class EcdController {
     try {
       const { editionId, tokenType, tokenNumber } = request.query as any;
       if (!editionId || !tokenType || !tokenNumber) return reply.status(400).send({ error: "Faltam parâmetros." });
-      
+
       const result = await ecdService.findRegistrationByTokenNumber(editionId, tokenType, parseInt(tokenNumber, 10));
       return reply.send(result);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  }
+
+  async exportPendentesPdf(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const { editionId } = request.query as any;
+      const pdfDoc = await ecdService.generatePendentesPdf(editionId);
+
+      reply.header('Content-Type', 'application/pdf');
+      reply.header('Content-Disposition', 'attachment; filename="fila-de-espera.pdf"');
+
+      return reply.send(pdfDoc);
     } catch (error: any) {
       return reply.status(400).send({ error: error.message });
     }

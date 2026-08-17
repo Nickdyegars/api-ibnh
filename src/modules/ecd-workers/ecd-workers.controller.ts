@@ -279,17 +279,33 @@ export class EcdWorkersController {
     }
 
     async exportTrabalhadoresPdf(request: FastifyRequest, reply: FastifyReply) {
-    try {
-      // Chama o serviço que criamos anteriormente
-      const doc = await service.generateTrabalhadoresPdf();
+        try {
+            // Chama o serviço que criamos anteriormente
+            const doc = await service.generateTrabalhadoresPdf();
 
-      reply.header('Content-Type', 'application/pdf');
-      reply.header('Content-Disposition', `inline; filename="equipe_trabalho.pdf"`);
+            reply.header('Content-Type', 'application/pdf');
+            reply.header('Content-Disposition', `inline; filename="equipe_trabalho.pdf"`);
 
-      return reply.send(doc);
-    } catch (error: any) {
-      console.error('[Export Trabalhadores PDF Error]', error);
-      return reply.status(400).send({ success: false, message: error.message });
+            return reply.send(doc);
+        } catch (error: any) {
+            console.error('[Export Trabalhadores PDF Error]', error);
+            return reply.status(400).send({ success: false, message: error.message });
+        }
     }
-  }
+
+    async exportTrabalhadoresPendentesPdf(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const { editionId } = request.query as { editionId?: string };
+
+            const pdfDoc = await service.generateTrabalhadoresPendentesPdf(editionId);
+
+            reply.header('Content-Type', 'application/pdf');
+            reply.header('Content-Disposition', 'attachment; filename="trabalhadores-espera.pdf"');
+
+            return reply.send(pdfDoc);
+        } catch (error: any) {
+            console.error('[Export Workers Pendentes Error]', error);
+            return reply.status(400).send({ error: error.message });
+        }
+    }
 }

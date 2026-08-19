@@ -1241,7 +1241,7 @@ export class EcdService {
       // Quebra de página se não houver espaço para a próxima linha
       if (doc.y + rowHeight > 780) {
         doc.addPage();
-        drawPageTitle(false); // Falso para não repetir o gráfico
+        drawPageTitle(false);
         drawTableHeader();
       }
 
@@ -1256,8 +1256,6 @@ export class EcdService {
           const response = await fetch(e.profile_photo_url);
           if (response.ok) {
             const arrayBuffer = await response.arrayBuffer();
-
-            // Pega a imagem bruta, corta num quadrado perfeito 100x100 para manter a máxima nitidez
             imgBuffer = await sharp(Buffer.from(arrayBuffer))
               .resize(100, 100, { fit: 'cover' })
               .jpeg({ quality: 100 })
@@ -1275,21 +1273,37 @@ export class EcdService {
       // 1. Coluna: FOTO
       if (imgBuffer) {
         doc.image(imgBuffer, 45, rowY + 5, { width: 55, height: 55 });
-        // Borda fininha na foto
         doc.rect(45, rowY + 5, 55, 55).lineWidth(1).strokeColor('#cbd5e1').stroke();
       } else {
-        // Placeholder se não tiver foto ou der erro
         doc.rect(45, rowY + 5, 55, 55).lineWidth(1).dash(3, { space: 3 }).strokeColor('#cbd5e1').stroke();
         doc.undash();
         doc.fillColor('#94a3b8').fontSize(7).font('Helvetica-Oblique')
           .text('SEM FOTO', 45, rowY + 28, { align: 'center', width: 55 });
       }
 
-      // 2. Coluna: DADOS PESSOAIS
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(9)
-        .text(e.full_name || '-', 120, rowY + 15, { width: 160, ellipsis: true });
+      // 👇 2. Coluna: DADOS PESSOAIS (Agora com empilhamento dinâmico) 👇
+      let textPosY = rowY + 8; // Subimos ligeiramente o início para caber as 3 possíveis informações
+
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(9);
+
+      // Limita a altura a 24px (aprox 2 linhas). Se estourar, aplica reticências automáticas
+      doc.text(e.full_name || '-', 120, textPosY, { width: 160, height: 24, ellipsis: true });
+
+      // O PDFKit guarda a posição final da linha na variável doc.y.
+      // Assim, se o nome ocupou 1 linha ou 2 linhas, nós continuamos exatamente daqui!
+      textPosY = doc.y + 1;
+
+      if (e.nickname) {
+        doc.fillColor('#0284c7').font('Helvetica-Oblique').fontSize(8)
+          .text(`"${e.nickname}"`, 120, textPosY, { width: 160, lineBreak: false, ellipsis: true });
+
+        textPosY = doc.y + 2;
+      } else {
+        textPosY += 2; // Respiro extra caso não tenha apelido
+      }
+
       doc.fillColor('#64748b').font('Helvetica').fontSize(8)
-        .text(`${e.age || '-'} anos  |  Sexo: ${e.gender || '-'}`, 120, rowY + 28, { width: 160 });
+        .text(`${e.age || '-'} anos  |  Sexo: ${e.gender || '-'}`, 120, textPosY, { width: 160 });
 
       // 3. Coluna: ORIGEM / LÍDER
       const leaderName = e.leader?.cell?.leader || e.leader?.name || e.cell_leader_name || 'Desconhecido';
@@ -1311,14 +1325,13 @@ export class EcdService {
       // Linha divisória no final da row
       doc.moveTo(40, rowY + rowHeight).lineTo(555, rowY + rowHeight).strokeColor('#e2e8f0').lineWidth(1).stroke();
 
-      // Avança o Y para a próxima iteração
+      // Avança o Y para a próxima iteração com a altura fixa de 70
       doc.y = rowY + rowHeight;
     }
 
     doc.end();
     return doc;
   }
-
   // ==========================================
   // BUSCA DE FICHA PELO ID IMPRESSO NO RODAPÉ
   // ==========================================
@@ -1496,6 +1509,98 @@ export class EcdService {
       doc.moveTo(40, rowY + rowHeight).lineTo(555, rowY + rowHeight).strokeColor('#e2e8f0').lineWidth(1).stroke();
       doc.y = rowY + rowHeight;
     }
+
+    doc.end();
+    return doc;
+  }
+
+  // ==========================================
+  // RELATÓRIO DE ENCONTRISTAS (APENAS NOMES, SEPARADO POR SEXO)
+  // ==========================================
+  async generateEncontristasListagemPdf() {
+    const currentEdition = await prisma.ecdEdition.findFirst({
+      orderBy: { created_at: 'desc' }
+    });
+
+    if (!currentEdition) throw new Error("Nenhuma edição ativa encontrada.");
+
+    let encontristas = await prisma.ecdRegistration.findMany({
+      where: {
+        edition_id: currentEdition.id,
+        status: { in: ['ATIVO', 'CONCLUIDO'] }
+      },
+      select: {
+        full_name: true,
+        nickname: true,
+        gender: true
+      }
+    });
+
+    if (encontristas.length === 0) throw new Error("Nenhum encontrista aprovado encontrado.");
+
+    // Separa por sexo e ordena alfabeticamente
+    const homens = encontristas.filter(e => e.gender === 'M').sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'pt-BR'));
+    const mulheres = encontristas.filter(e => e.gender !== 'M').sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'pt-BR'));
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+    const drawPageHeader = (title: string, color: string, totalCount: number) => {
+      doc.fillColor(color).font('Helvetica-Bold').fontSize(16)
+        .text(`LISTA DE CHAMADA - ${title} (${totalCount})`, 40, 40, { align: 'center', width: 515 });
+      doc.fontSize(10).font('Helvetica').fillColor('#64748b')
+        .text(`Edição: ${currentEdition.name} | Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, 40, 60, { align: 'center', width: 515 });
+      doc.moveDown(2);
+    };
+
+    const drawGroup = (groupTitle: string, groupData: any[], headerColor: string) => {
+      if (groupData.length === 0) return;
+
+      drawPageHeader(groupTitle, headerColor, groupData.length);
+
+      let currentY = doc.y;
+      const rowHeight = 26;
+
+      let index = 1;
+      for (const e of groupData) {
+        if (currentY + rowHeight > 780) {
+          doc.addPage();
+          drawPageHeader(groupTitle, headerColor, groupData.length);
+          currentY = doc.y;
+        }
+
+        // Número sequencial discreto
+        doc.fillColor('#94a3b8').font('Helvetica').fontSize(9)
+          .text(`${index++}.`, 40, currentY + 6, { width: 30, align: 'right' });
+
+        // Posiciona no X do nome e usa 'continued: true' para empilhar o apelido perfeitamente ao lado
+        doc.x = 80;
+        doc.y = currentY + 6;
+
+        if (e.nickname) {
+          doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(10)
+            .text(`${e.full_name || '-'} `, { continued: true });
+
+          doc.fillColor(headerColor).font('Helvetica-Oblique').fontSize(9)
+            .text(`("${e.nickname}")`, { continued: false });
+        } else {
+          doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(10)
+            .text(e.full_name || '-', { continued: false });
+        }
+
+        // Linha divisória bem leve logo abaixo
+        doc.moveTo(80, currentY + 21).lineTo(535, currentY + 21).strokeColor('#f1f5f9').lineWidth(0.5).stroke();
+        currentY += rowHeight;
+      }
+    };
+
+    // Desenha o grupo de Homens (Azul)
+    drawGroup('HOMENS', homens, '#0284c7');
+
+    // Quebra de página antes das mulheres
+    if (homens.length > 0 && mulheres.length > 0) doc.addPage();
+
+    // Desenha o grupo de Mulheres (Rosa/Magenta)
+    drawGroup('MULHERES', mulheres, '#db2777');
 
     doc.end();
     return doc;

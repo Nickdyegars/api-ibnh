@@ -71,5 +71,6 @@ export async function ecdRoutes(app: FastifyInstance) {
     childApp.get('/registrations/search-by-code', (req, rep) => ecdController.searchRegistrationByShortCode(req, rep));
     childApp.get('/registrations/search-by-number', (req, rep) => ecdController.searchRegistrationByTokenNumber(req, rep));
     childApp.get('/editions/pendentes-pdf', (req, rep) => ecdController.exportPendentesPdf(req, rep));
+    childApp.get('/editions/encontristas-listagem-pdf', (req, rep) => ecdController.exportEncontristasListagemPdf(req, rep));
   });
 }

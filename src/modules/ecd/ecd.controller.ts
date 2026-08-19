@@ -840,4 +840,15 @@ export class EcdController {
       return reply.status(400).send({ error: error.message });
     }
   }
+
+  async exportEncontristasListagemPdf(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const pdfDoc = await ecdService.generateEncontristasListagemPdf();
+      reply.header('Content-Type', 'application/pdf');
+      reply.header('Content-Disposition', 'attachment; filename="lista-chamada-encontristas.pdf"');
+      return reply.send(pdfDoc);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  }
 }

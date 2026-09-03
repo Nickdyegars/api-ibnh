@@ -46,6 +46,7 @@ model Ministry {
   
   // 👇 ADICIONE ESTA LINHA AQUI 👇
   teams       Team[]
+  areas     MinistryArea[]
 
   @@map("ministries")
   @@schema("app")
@@ -70,6 +71,8 @@ model Member {
   email       String?  @db.VarChar(255) // 👇 Campo adicionado para o Google Agenda
   phone       String?  @db.VarChar(20)
   role        String?  @db.VarChar(100) 
+
+  is_active   Boolean  @default(true)
   
   team_id     String?  @db.Uuid
   team        Team?    @relation(fields: [team_id], references: [id], onDelete: SetNull)
@@ -79,8 +82,32 @@ model Member {
   created_at  DateTime? @default(now()) @db.Timestamptz(3)
   
   shifts      ShiftAssignment[]
+  areas MemberArea[]
 
   @@map("members")
+  @@schema("app")
+}
+
+model MinistryArea {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String   @db.VarChar(100)
+  ministry_id Int
+  ministry    Ministry @relation(fields: [ministry_id], references: [id], onDelete: Cascade)
+
+  members     MemberArea[]
+
+  @@map("ministry_areas")
+  @@schema("app")
+}
+
+model MemberArea {
+  member_id String       @db.Uuid
+  area_id   String       @db.Uuid
+  member    Member       @relation(fields: [member_id], references: [id], onDelete: Cascade)
+  area      MinistryArea @relation(fields: [area_id], references: [id], onDelete: Cascade)
+  
+  @@id([member_id, area_id])
+  @@map("member_areas")
   @@schema("app")
 }
 
@@ -281,6 +308,8 @@ model ShiftAssignment {
   shift     Shift  @relation(fields: [shift_id], references: [id], onDelete: Cascade)
   member_id String @db.Uuid
   member    Member @relation(fields: [member_id], references: [id], onDelete: Cascade)
+
+  area_name String? @db.VarChar(100)
 
   @@id([shift_id, member_id])
   @@map("shift_assignments")

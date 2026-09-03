@@ -14,10 +14,11 @@ export class MemberService {
   }
 
   async getAllMembers() {
-    const members = await prisma.member.findMany({
+    const members: any[] = await prisma.member.findMany({
       include: {
         ministry: true,
-        team: true // 👈 A CORREÇÃO ESTÁ AQUI! Tem que pedir pro banco trazer a equipe.
+        team: true,
+        areas: { include: { area: true } }
       },
       orderBy: { name: 'asc' }
     });
@@ -28,25 +29,41 @@ export class MemberService {
       email: m.email,
       phone: m.phone,
       role: m.role,
-      teamName: m.team?.name, // Agora o TypeScript sabe que 'team' existe!
+      teamName: m.team?.name,
       ministry: m.ministry?.name || 'Geral',
-      createdAt: m.created_at
+      createdAt: m.created_at,
+      is_active: m.is_active,
+      areas: m.areas ? m.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []
     }));
   }
 
-  async createMember(data: MemberBodyType) {
+  async createMember(data: any) {
     const ministryId = await this.getMinistryId(data.ministry);
 
-    const member = await prisma.member.create({
-      data: {
-        name: data.name,
-        email: data.email || null,
-        phone: data.phone ?? null,
-        role: data.role ?? null,
-        team_id: data.team ?? null,
-        ministry_id: ministryId
-      },
-      include: { ministry: true, team: true }
+    // 1. Monta o objeto apenas com os dados que existem
+    const payload: any = {
+      name: data.name,
+      email: data.email || null,
+      phone: data.phone ?? null,
+      role: data.role ?? null,
+      team_id: data.team ?? null,
+      ministry_id: ministryId,
+      is_active: data.is_active ?? true
+    };
+
+    // 2. Só cria a relação se o usuário tiver selecionado alguma área
+    if (data.areas && data.areas.length > 0) {
+      payload.areas = {
+        create: data.areas.map((areaId: string) => ({
+          area_id: areaId
+        }))
+      };
+    }
+
+    // 3. Tipamos como ': any' para o TypeScript aceitar os includes sem erro de cache
+    const member: any = await prisma.member.create({
+      data: payload,
+      include: { ministry: true, team: true, areas: { include: { area: true } } }
     });
 
     return {
@@ -54,26 +71,47 @@ export class MemberService {
       name: member.name,
       email: member.email,
       phone: member.phone,
-      role: member.role, // 👈 RETORNA
+      role: member.role,
       ministry: member.ministry?.name,
-      createdAt: member.created_at
+      createdAt: member.created_at,
+      s_active: member.is_active,
+      areas: member.areas ? member.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []
     };
   }
 
-  async updateMember(id: string, data: MemberBodyType) {
+  async updateMember(id: string, data: any) {
     const ministryId = await this.getMinistryId(data.ministry);
 
-    const member = await prisma.member.update({
+    // 1. Limpa as áreas antigas do membro (para não duplicar)
+    await prisma.memberArea.deleteMany({
+      where: { member_id: id }
+    });
+
+    // 2. Prepara os novos dados
+    const payload: any = {
+      name: data.name,
+      phone: data.phone ?? null,
+      email: data.email ?? null,
+      role: data.role ?? null,
+      team_id: data.team ?? null,
+      ministry_id: ministryId,
+      is_active: data.is_active ?? true
+    };
+
+    // 3. Adiciona as novas áreas, se houver
+    if (data.areas && data.areas.length > 0) {
+      payload.areas = {
+        create: data.areas.map((areaId: string) => ({
+          area_id: areaId
+        }))
+      };
+    }
+
+    // 4. Executa a atualização
+    const member: any = await prisma.member.update({
       where: { id },
-      data: {
-        name: data.name,
-        phone: data.phone ?? null,
-        email: data.email ?? null,
-        role: data.role ?? null,
-        team_id: data.team ?? null, // 👈 SALVAR A EQUIPA
-        ministry_id: ministryId
-      },
-      include: { ministry: true, team: true }
+      data: payload,
+      include: { ministry: true, team: true, areas: { include: { area: true } } }
     });
 
     return {
@@ -81,9 +119,11 @@ export class MemberService {
       name: member.name,
       email: member.email,
       phone: member.phone,
-      role: member.role, // 👈 RETORNA
+      role: member.role,
       ministry: member.ministry?.name,
-      createdAt: member.created_at
+      createdAt: member.created_at,
+      s_active: member.is_active,
+      areas: member.areas ? member.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []
     };
   }
 

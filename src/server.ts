@@ -19,6 +19,7 @@ import { ecdRoutes } from './modules/ecd/ecd.routes.js';
 import { repertorioRoutes } from './modules/repertorio/repertorio.routes.js';
 import { teamRoutes } from './modules/teams/team.routes.js';
 import { ecdWorkersRoutes } from './modules/ecd-workers/ecd-workers.routes.js';
+import { areaRoutes } from './modules/area/area.routes.js';
 import fastifyRateLimit from '@fastify/rate-limit';
 
 const app = Fastify({ logger: true });
@@ -111,8 +112,8 @@ app.register(async function apiV1(v1) {
   v1.register(repertorioRoutes, { prefix: '/repertorio' });
   v1.register(teamRoutes, { prefix: '/teams' });
   v1.register(ecdWorkersRoutes, { prefix: '/ecd-workers' });
-
   v1.register(analyticsRoutes, { prefix: '/analytics' });
+  v1.register(areaRoutes, { prefix: '/areas' });
 
 }, { prefix: '/v1' }); // 👈 O prefixo global entra aqui!
 

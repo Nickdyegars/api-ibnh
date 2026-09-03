@@ -8,21 +8,18 @@ dotenv.config();
 export class RosterService {
 
     async createRoster(data: CreateRosterBodyType) {
-        // 1. Acha o Ministério
         const ministry = await prisma.ministry.findUnique({
             where: { name: data.ministry }
         });
 
         if (!ministry) throw new Error(`Ministério '${data.ministry}' não encontrado no banco.`);
 
-        // 2. Busca os membros salvando o OBJETO TODO para termos acesso ao E-mail!
+        // Busca todos os membros do ministério para termos um mapa rápido por nome
         const membersList = await prisma.member.findMany({
             where: { ministry_id: ministry.id }
         });
-        // IMPORTANTE: Assumimos que a tabela Member no Prisma possui a coluna 'email'
-        const memberMap = new Map(membersList.map(m => [m.name, m]));
+        const memberMap = new Map(membersList.map(m => [m.name.trim(), m]));
 
-        // 3. Cria a Escala Principal (Schedule)
         const schedule = await prisma.schedule.create({
             data: {
                 month_reference: data.month,
@@ -30,10 +27,8 @@ export class RosterService {
             }
         });
 
-        // Variável para acumularmos o texto formatado para o WhatsApp
         let whatsappBackupText = `📋 *ESCALA CONSOLIDADA - ${data.ministry.toUpperCase()}* 📋\n\n`;
 
-        // 4. Cria os Turnos (Shifts) e as Associações (ShiftAssignments)
         for (const shift of data.shifts) {
             const [day, month, year] = shift.date.split('/');
             const shiftDate = new Date(`${year}-${month}-${day}T12:00:00Z`);
@@ -48,25 +43,35 @@ export class RosterService {
 
             whatsappBackupText += `📅 *DATA: ${shift.date} (${shift.dayName})*\n`;
 
-            // Vincula a equipe
-            for (const memberName of shift.team) {
-                const memberObj = memberMap.get(memberName);
+            // Set para evitar inserir o mesmo membro duas vezes no mesmo culto por segurança
+            const insertedMembersInShift = new Set<string>();
 
-                if (memberObj) {
+            for (const memberString of shift.team) {
+                const match = memberString.match(/^(.*?) \((.*?)\)$/);
+                const rawName = match ? (match[1] ?? "").trim() : memberString.trim();
+                const areaName = match ? (match[2] ?? "").trim() : null;
+
+                const memberObj = memberMap.get(rawName);
+
+                if (memberObj && !insertedMembersInShift.has(memberObj.id)) {
+                    insertedMembersInShift.add(memberObj.id);
+
                     await prisma.shiftAssignment.create({
                         data: {
                             shift_id: createdShift.id,
-                            member_id: memberObj.id
+                            member_id: memberObj.id,
+                            area_name: areaName
                         }
                     });
 
-                    whatsappBackupText += ` 🔹 ${memberName}\n`;
+                    whatsappBackupText += ` 🔹 ${memberString}\n`;
+                } else if (memberString.includes('FALTA GENTE')) {
+                    whatsappBackupText += ` ⚠️ ${memberString}\n`;
                 }
             }
             whatsappBackupText += `\n`;
         }
 
-        // Retornamos a escala salva E o texto do WhatsApp gerado
         return {
             schedule,
             whatsappBackupText: whatsappBackupText.trim()
@@ -74,30 +79,27 @@ export class RosterService {
     }
 
     async getAllRosters(ministryFilter: string) {
-        // 1. Busca as escalas no Prisma com todas as relações
+        // 1. Busca as escalas no Prisma com todas as relações e áreas dos turnos
         const schedules = await prisma.schedule.findMany({
-
-            // CORREÇÃO: Usamos {} em vez de undefined quando for 'all'
             where: ministryFilter !== 'all'
                 ? { ministry: { name: ministryFilter } }
                 : {},
-
             include: {
                 ministry: true,
                 author: { include: { profile: true } },
                 shifts: {
-                    orderBy: { shift_date: 'asc' }, // Ordena por data do culto
+                    orderBy: { shift_date: 'asc' },
                     include: {
                         members: {
-                            include: { member: true } // Puxa o nome da pessoa escalada
+                            include: { member: true } // Puxa o membro e a area_name salva na tabela shift_assignments
                         }
                     }
                 }
             },
-            orderBy: { created_at: 'desc' } // Escalas mais novas primeiro
+            orderBy: { created_at: 'desc' }
         });
 
-        // 2. Formata para o formato exato que o seu Frontend (React) espera
+        // 2. Mapeia e reconstrói o array 'team' garantindo que a área vá junto ("Nome (Área)")
         return schedules.map(schedule => ({
             id: schedule.id,
             ministry: schedule.ministry?.name || 'Geral',
@@ -107,8 +109,14 @@ export class RosterService {
             shifts: schedule.shifts.map(shift => ({
                 id: shift.id,
                 date: new Date(shift.shift_date).toLocaleDateString('pt-BR', { timeZone: 'UTC' }),
-                dayName: shift.day_name,
-                team: shift.members.map(assignment => assignment.member.name)
+                dayName: shift.day_name || '',
+                team: shift.members.map(assignment => {
+                    // Se houver uma área salva, retorna "Nome (Área)", senão apenas o nome
+                    if (assignment.area_name) {
+                        return `${assignment.member.name} (${assignment.area_name})`;
+                    }
+                    return assignment.member.name;
+                })
             }))
         }));
     }
@@ -121,22 +129,21 @@ export class RosterService {
     }
 
     async generateRosterPreview(data: any) {
-        // 1. Recebemos o louvorMode enviado pelo modal
         const { month, ministry: ministryName, teamSize, restrictions, louvorMode } = data;
 
-        // 2. Busca o Ministério e os Membros no Postgres
         const ministry = await prisma.ministry.findUnique({ where: { name: ministryName } });
         if (!ministry) throw new Error("Ministério não encontrado");
 
-        // 👇 PUXAMOS O ROLE E O TEAM TAMBÉM
         const members = await prisma.member.findMany({
-            where: { ministry_id: ministry.id },
-            select: { name: true, role: true, team: true }
+            where: {
+                ministry_id: ministry.id,
+                is_active: true
+            },
+            select: { name: true, role: true, team: true, areas: { include: { area: true } } }
         });
 
-        if (members.length === 0) throw new Error("Nenhum membro cadastrado neste ministério");
+        if (members.length === 0) throw new Error("Nenhum membro ativo cadastrado neste ministério");
 
-        // 3. Lógica de Datas (Quintas e Domingos)
         const [year, monthNum] = month.split('-').map(Number);
         const date = new Date(year, monthNum - 1, 1);
         const services: any[] = [];
@@ -145,14 +152,14 @@ export class RosterService {
             const dayOfWeek = date.getDay();
             if (dayOfWeek === 0 || dayOfWeek === 4) {
                 const rawDate = date.toISOString().split('T')[0];
-                const actualDate = new Date(rawDate + 'T12:00:00'); // 👈 Guarda a data real intacta
+                const actualDate = new Date(rawDate + 'T12:00:00');
 
                 const tempDate = new Date(rawDate + 'T12:00:00');
                 const diff = tempDate.getDate() - tempDate.getDay();
                 const weekKey = new Date(tempDate.setDate(diff)).toDateString();
 
                 services.push({
-                    date: actualDate.toLocaleDateString('pt-BR'), // 👈 Usa a data real aqui
+                    date: actualDate.toLocaleDateString('pt-BR'),
                     rawDate,
                     dayName: dayOfWeek === 0 ? 'Domingo' : 'Quinta-feira',
                     weekKey
@@ -169,6 +176,10 @@ export class RosterService {
 
         const generatedShifts: any[] = [];
 
+        // 👇 VERIFICAÇÃO BLINDADA PARA A MÍDIA 👇
+        // Aceita Mídia, Midia, Multimídia ou Multimidia
+        const isMedia = ministryName.includes('Mídia') || ministryName.includes('Midia') || ministryName.includes('Multimídia') || ministryName.includes('Multimidia');
+
         // ==============================================================
         // MODO 1: LOUVOR POR EQUIPES/BANDAS FIXAS
         // ==============================================================
@@ -176,7 +187,6 @@ export class RosterService {
             const teamsMap = members.reduce((acc, m: any) => {
                 if (m.team && m.team.name && m.team.name.trim() !== '') {
                     const tName = m.team.name.trim();
-                    // Tipamos o acc para evitar o erro do index type
                     if (!acc[tName]) acc[tName] = [];
                     acc[tName].push(m.name);
                 }
@@ -184,9 +194,7 @@ export class RosterService {
             }, {} as Record<string, string[]>);
 
             const availableTeams = Object.keys(teamsMap);
-            if (availableTeams.length === 0) {
-                throw new Error("Nenhuma banda cadastrada! Edite os membros e adicione uma 'Equipe', ou mude o modo para 'Avulsos'.");
-            }
+            if (availableTeams.length === 0) throw new Error("Nenhuma banda cadastrada!");
 
             let teamPool = [...availableTeams].sort(() => Math.random() - 0.5);
             let teamIdx = 0;
@@ -196,10 +204,7 @@ export class RosterService {
                 let attempts = 0;
 
                 while (!assignedTeamName && attempts < teamPool.length * 2) {
-
-                    // 👇 ADICIONE "as string" NO FINAL DESTA LINHA 👇
                     const candidateTeam = teamPool[teamIdx % teamPool.length] as string;
-
                     const teamMembers = teamsMap[candidateTeam] || [];
 
                     const teamIsAvailable = weekServices.every((s: any) =>
@@ -218,9 +223,161 @@ export class RosterService {
                 });
             });
         }
-
         // ==============================================================
-        // MODO 2: AVULSOS OU OUTROS MINISTÉRIOS (Sorteio Normal)
+        // 👇 MODO 2: ESCALA POR ÁREAS COM CONTINUIDADE REAL (DOM -> QUI) 👇
+        // ==============================================================
+        else if (louvorMode === 'AREAS' || isMedia) {
+
+            const activeAreas = await prisma.ministryArea.findMany({
+                where: { ministry_id: ministry.id }
+            });
+
+            if (activeAreas.length === 0) {
+                throw new Error("Nenhuma área cadastrada! Cadastre áreas no painel.");
+            }
+
+            const memberUsageCount: Record<string, number> = {};
+            members.forEach(m => memberUsageCount[m.name] = 0);
+
+            const [year, monthNum] = month.split('-').map(Number);
+            const date = new Date(year, monthNum - 1, 1);
+            const services: any[] = [];
+
+            while (date.getMonth() === monthNum - 1) {
+                const dayOfWeek = date.getDay();
+                if (dayOfWeek === 0 || dayOfWeek === 4) {
+                    // Adicionando '!' para garantir ao TS que a string existe
+                    const rawDate = date.toISOString().split('T')[0]!;
+                    const actualDate = new Date(rawDate + 'T12:00:00');
+
+                    const tempDate = new Date(rawDate + 'T12:00:00');
+                    const diff = tempDate.getDate() - tempDate.getDay();
+                    const sundayOfThisWeek = new Date(tempDate.setDate(diff));
+                    const weekKey = sundayOfThisWeek.toISOString().split('T')[0]!;
+
+                    services.push({
+                        date: actualDate.toLocaleDateString('pt-BR'),
+                        rawDate,
+                        dayName: dayOfWeek === 0 ? 'Domingo' : 'Quinta-feira',
+                        weekKey
+                    });
+                }
+                date.setDate(date.getDate() + 1);
+            }
+
+            const servicesByWeek = services.reduce((acc, s) => {
+                if (!acc[s.weekKey]) acc[s.weekKey] = [];
+                acc[s.weekKey].push(s);
+                return acc;
+            }, {} as Record<string, any[]>);
+
+            const prevMonthDate = new Date(year, monthNum - 2, 1);
+            const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+            const lastSchedulePrevMonth = await prisma.schedule.findFirst({
+                where: {
+                    ministry_id: ministry.id,
+                    month_reference: prevMonthStr
+                },
+                include: {
+                    shifts: {
+                        orderBy: { shift_date: 'desc' },
+                        take: 1,
+                        include: { members: { include: { member: true } } }
+                    }
+                }
+            });
+
+            let carryOverTeam: string[] = [];
+            let lastSundayWeekKey = "";
+
+            const lastShift = lastSchedulePrevMonth?.shifts?.[0];
+            if (lastShift) {
+                const shiftDateObj = new Date(lastShift.shift_date);
+                // Adicionando '!' para garantir ao TS
+                const rawLast = shiftDateObj.toISOString().split('T')[0]!;
+                const tempD = new Date(rawLast + 'T12:00:00');
+
+                if (tempD.getDay() === 0 && lastShift.members) {
+                    carryOverTeam = lastShift.members.map(m =>
+                        m.area_name ? `${m.member.name} (${m.area_name})` : m.member.name
+                    );
+
+                    const diff = tempD.getDate() - tempD.getDay();
+                    const lastSunday = new Date(tempD.setDate(diff));
+                    // Adicionando '!' para garantir ao TS
+                    lastSundayWeekKey = lastSunday.toISOString().split('T')[0]!;
+                }
+            }
+
+            let isFirstWeek = true;
+
+            Object.entries(servicesByWeek).forEach(([weekKey, weekServices]: [string, any]) => {
+
+                let weeklyShiftTeam: string[] = [];
+                const busyMembers = new Set<string>();
+
+                if (isFirstWeek && weekKey === lastSundayWeekKey && carryOverTeam.length > 0) {
+                    weeklyShiftTeam = [...carryOverTeam];
+                    isFirstWeek = false;
+
+                    weekServices.forEach((s: any) => {
+                        generatedShifts.push({
+                            date: s.date,
+                            dayName: s.dayName,
+                            team: [...weeklyShiftTeam]
+                        });
+                    });
+                    return;
+                }
+
+                isFirstWeek = false;
+
+                for (const area of activeAreas) {
+                    const eligibleMembers = members.filter(m =>
+                        m.areas.some((a: any) => a.area_id === area.id)
+                    );
+
+                    const pool = [...eligibleMembers].sort((a, b) => {
+                        const countA = memberUsageCount[a.name] || 0;
+                        const countB = memberUsageCount[b.name] || 0;
+                        if (countA !== countB) return countA - countB;
+                        return Math.random() - 0.5;
+                    });
+
+                    let assigned = false;
+                    for (const candidate of pool) {
+                        const hasRestrictionInWeek = weekServices.some((s: any) =>
+                            restrictions.some((r: any) => r.member === candidate.name && r.date === s.rawDate)
+                        );
+
+                        const isBusyInAnotherArea = busyMembers.has(candidate.name);
+
+                        if (!hasRestrictionInWeek && !isBusyInAnotherArea) {
+                            weeklyShiftTeam.push(`${candidate.name} (${area.name})`);
+                            busyMembers.add(candidate.name);
+                            memberUsageCount[candidate.name] = (memberUsageCount[candidate.name] || 0) + 1;
+                            assigned = true;
+                            break;
+                        }
+                    }
+
+                    if (!assigned) {
+                        weeklyShiftTeam.push(`⚠️ FALTA GENTE (${area.name})`);
+                    }
+                }
+
+                weekServices.forEach((s: any) => {
+                    generatedShifts.push({
+                        date: s.date,
+                        dayName: s.dayName,
+                        team: [...weeklyShiftTeam]
+                    });
+                });
+            });
+        }
+        // ==============================================================
+        // MODO 3: AVULSOS OU OUTROS MINISTÉRIOS (Sorteio Simples)
         // ==============================================================
         else {
             let pool = [...members].sort(() => Math.random() - 0.5);
@@ -246,8 +403,6 @@ export class RosterService {
                     );
 
                     if (isAvailable && !weeklyTeam.includes(candidate)) {
-                        // Se for Louvor Avulso, podemos até adicionar a função dele (opcional)
-                        // Ex: "João (Bateria)" - Vamos manter limpo só com nome por enquanto.
                         weeklyTeam.push(candidate);
                     }
                     memberIndex++;
@@ -265,7 +420,6 @@ export class RosterService {
             });
         }
 
-        // 4. Retorna tudo ordenado
         return generatedShifts.sort((a, b) => {
             const dateA = a.date.split('/').reverse().join('-');
             const dateB = b.date.split('/').reverse().join('-');
@@ -274,39 +428,44 @@ export class RosterService {
     }
 
     async updateShiftTeam(shiftId: string, newTeamNames: string[]) {
-        // 1. Encontra o turno e pega o ID do ministério para filtrar os membros corretos
         const shift = await prisma.shift.findUnique({
             where: { id: shiftId },
             include: { schedule: true }
         });
 
-        if (!shift || !shift.schedule?.ministry_id) {
+        // Tratamento seguro para evitar erro de schedule null/undefined
+        const ministryId = shift?.schedule?.ministry_id;
+        if (!shift || !ministryId) {
             throw new Error("Turno ou Ministério não encontrado.");
         }
 
-        // 2. Busca os IDs dos novos membros baseados nos nomes recebidos
-        const members = await prisma.member.findMany({
-            where: {
-                ministry_id: shift.schedule.ministry_id,
-                name: { in: newTeamNames }
-            }
-        });
-
-        // 3. Usamos uma "Transação" do Prisma para garantir que não haja falhas pela metade
         await prisma.$transaction(async (tx) => {
-            // A) Remove quem estava escalado neste dia específico
             await tx.shiftAssignment.deleteMany({
                 where: { shift_id: shiftId }
             });
 
-            // B) Adiciona a nova equipe
-            for (const member of members) {
-                await tx.shiftAssignment.create({
-                    data: {
-                        shift_id: shiftId,
-                        member_id: member.id
+            for (const memberString of newTeamNames) {
+                const match = memberString.match(/^(.*?) \((.*?)\)$/);
+                // 👇 Forçamos a conversão segura para string
+                const rawName = match ? (match[1] ?? "").trim() : memberString.trim();
+                const areaName = match ? (match[2] ?? "").trim() : null;
+
+                const member = await tx.member.findFirst({
+                    where: {
+                        ministry_id: ministryId,
+                        name: rawName
                     }
                 });
+
+                if (member) {
+                    await tx.shiftAssignment.create({
+                        data: {
+                            shift_id: shiftId,
+                            member_id: member.id,
+                            area_name: areaName
+                        }
+                    });
+                }
             }
         });
 

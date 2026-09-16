@@ -3,10 +3,11 @@ import { repertorioController } from './repertorio.controller.js';
 
 export async function repertorioRoutes(app: FastifyInstance) {
   
-  // ROTA PÚBLICA (Visualização do Repertório)
+  // ROTAS PÚBLICAS (Visualização)
   app.get('/', (req, rep) => repertorioController.getSongs(req, rep));
+  app.get('/tags', (req, rep) => repertorioController.getTags(req, rep)); // Lista os filtros
 
-  // ROTAS PROTEGIDAS (Apenas usuários autorizados)
+  // ROTAS PROTEGIDAS (Gerenciamento)
   app.register(async (protectedApp) => {
     
     protectedApp.addHook('onRequest', async (request, reply) => {
@@ -14,7 +15,6 @@ export async function repertorioRoutes(app: FastifyInstance) {
         await request.jwtVerify();
         const requester = request.user as any;
         
-        // CORREÇÃO: Permite Nível 0 (Super Admin) e Nível 2 (Líderes/Secretaria) gerenciarem as músicas
         if (requester.level !== 0 && requester.level !== 2) {
           return reply.status(403).send({ 
             error: 'Acesso negado. Você não tem permissão para gerenciar o repertório.' 
@@ -25,8 +25,14 @@ export async function repertorioRoutes(app: FastifyInstance) {
       }
     });
 
+    // CRUD de Músicas
     protectedApp.post('/', (req, rep) => repertorioController.createSong(req, rep));
     protectedApp.put('/:id', (req, rep) => repertorioController.updateSong(req, rep));
     protectedApp.delete('/:id', (req, rep) => repertorioController.deleteSong(req, rep));
+
+    // CRUD de Tags
+    protectedApp.post('/tags', (req, rep) => repertorioController.createTag(req, rep));
+    protectedApp.put('/tags/:id', (req, rep) => repertorioController.updateTag(req, rep));
+    protectedApp.delete('/tags/:id', (req, rep) => repertorioController.deleteTag(req, rep));
   });
 }

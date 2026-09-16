@@ -181,45 +181,202 @@ export class RosterService {
         const isMedia = ministryName.includes('Mídia') || ministryName.includes('Midia') || ministryName.includes('Multimídia') || ministryName.includes('Multimidia');
 
         // ==============================================================
-        // MODO 1: LOUVOR POR EQUIPES/BANDAS FIXAS
+        // MODO 1: LOUVOR POR SORTEIO CRUZADO (VOCAL + BANDA) COM CONTINUIDADE E BALANCEAMENTO
         // ==============================================================
         if (ministryName === 'Louvor' && louvorMode === 'EQUIPE') {
+
+            // 1. Agrupa os membros por equipes
             const teamsMap = members.reduce((acc, m: any) => {
                 if (m.team && m.team.name && m.team.name.trim() !== '') {
                     const tName = m.team.name.trim();
                     if (!acc[tName]) acc[tName] = [];
-                    acc[tName].push(m.name);
+                    // Já pegamos o "role" do membro para exibir bonitinho (ex: Bateria, Baixo, Vocal)
+                    acc[tName].push({ name: m.name, role: m.role || 'Membro' });
                 }
                 return acc;
-            }, {} as Record<string, string[]>);
+            }, {} as Record<string, { name: string, role: string }[]>);
 
-            const availableTeams = Object.keys(teamsMap);
-            if (availableTeams.length === 0) throw new Error("Nenhuma banda cadastrada!");
+            const allTeamNames = Object.keys(teamsMap);
+            if (allTeamNames.length === 0) throw new Error("Nenhuma equipe (Vocal ou Banda) cadastrada!");
 
-            let teamPool = [...availableTeams].sort(() => Math.random() - 0.5);
-            let teamIdx = 0;
+            // Separa as equipes baseando-se na palavra 'VOCAL'
+            const vocalTeams = allTeamNames.filter(t => t.toUpperCase().includes('VOCAL'));
+            const bandTeams = allTeamNames.filter(t => !t.toUpperCase().includes('VOCAL'));
 
-            Object.values(servicesByWeek).forEach((weekServices: any) => {
-                let assignedTeamName = null;
-                let attempts = 0;
+            if (vocalTeams.length === 0) throw new Error("Nenhum grupo de Vocal cadastrado! (O nome da equipe deve conter a palavra 'VOCAL')");
+            if (bandTeams.length === 0) throw new Error("Nenhuma Banda cadastrada!");
 
-                while (!assignedTeamName && attempts < teamPool.length * 2) {
-                    const candidateTeam = teamPool[teamIdx % teamPool.length] as string;
-                    const teamMembers = teamsMap[candidateTeam] || [];
+            // 2. Contadores de uso para garantir a rotação justa e não sobrecarregar ninguém
+            const vocalUsageCount: Record<string, number> = {};
+            vocalTeams.forEach(t => vocalUsageCount[t] = 0);
 
-                    const teamIsAvailable = weekServices.every((s: any) =>
-                        !restrictions?.some((r: any) => teamMembers.includes(r.member) && r.date === s.rawDate)
+            const bandUsageCount: Record<string, number> = {};
+            bandTeams.forEach(t => bandUsageCount[t] = 0);
+
+            // 3. Mapeia as semanas com a lógica rigorosa do TypeScript (Domingo -> Quinta)
+            const [year, monthNum] = month.split('-').map(Number);
+            const date = new Date(year, monthNum - 1, 1);
+            const safeServices: any[] = [];
+
+            while (date.getMonth() === monthNum - 1) {
+                const dayOfWeek = date.getDay();
+                if (dayOfWeek === 0 || dayOfWeek === 4) {
+                    const rawDate = date.toISOString().split('T')[0]!;
+                    const actualDate = new Date(rawDate + 'T12:00:00');
+
+                    // Acha a data exata do domingo desta semana para servir como "Chave" do Bloco
+                    const tempDate = new Date(rawDate + 'T12:00:00');
+                    const diff = tempDate.getDate() - tempDate.getDay();
+                    const sundayOfThisWeek = new Date(tempDate.setDate(diff));
+                    const weekKey = sundayOfThisWeek.toISOString().split('T')[0]!;
+
+                    safeServices.push({
+                        date: actualDate.toLocaleDateString('pt-BR'),
+                        rawDate,
+                        dayName: dayOfWeek === 0 ? 'Domingo' : 'Quinta-feira',
+                        weekKey
+                    });
+                }
+                date.setDate(date.getDate() + 1);
+            }
+
+            const safeServicesByWeek = safeServices.reduce((acc, s) => {
+                if (!acc[s.weekKey]) acc[s.weekKey] = [];
+                acc[s.weekKey].push(s);
+                return acc;
+            }, {} as Record<string, any[]>);
+
+            // 4. Busca o último turno do mês passado (Para verificar se sobrou uma Quinta-feira órfã)
+            const prevMonthDate = new Date(year, monthNum - 2, 1);
+            const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+            const lastSchedulePrevMonth = await prisma.schedule.findFirst({
+                where: {
+                    ministry_id: ministry.id,
+                    month_reference: prevMonthStr
+                },
+                include: {
+                    shifts: {
+                        orderBy: { shift_date: 'desc' },
+                        take: 1,
+                        include: { members: { include: { member: true } } }
+                    }
+                }
+            });
+
+            let carryOverTeam: string[] = [];
+            let lastSundayWeekKey = "";
+
+            const lastShift = lastSchedulePrevMonth?.shifts?.[0];
+            if (lastShift) {
+                const shiftDateObj = new Date(lastShift.shift_date);
+                const rawLast = shiftDateObj.toISOString().split('T')[0]!;
+                const tempD = new Date(rawLast + 'T12:00:00');
+
+                // Só herda se o último turno do mês passado tiver sido um DOMINGO
+                if (tempD.getDay() === 0 && lastShift.members) {
+                    carryOverTeam = lastShift.members.map(m =>
+                        m.area_name ? `${m.member.name} (${m.area_name})` : m.member.name
                     );
 
-                    if (teamIsAvailable) assignedTeamName = candidateTeam;
-                    teamIdx++;
-                    attempts++;
+                    const diff = tempD.getDate() - tempD.getDay();
+                    const lastSunday = new Date(tempD.setDate(diff));
+                    lastSundayWeekKey = lastSunday.toISOString().split('T')[0]!;
+                }
+            }
+
+            let isFirstWeek = true;
+
+            // 5. Itera sobre as semanas para montar o bloco Domingo+Quinta
+            Object.entries(safeServicesByWeek).forEach(([weekKey, weekServices]: [string, any]) => {
+                let weeklyShiftTeam: string[] = [];
+
+                // CONTINUIDADE: A primeira quinta do mês herda a equipe do último domingo
+                if (isFirstWeek && weekKey === lastSundayWeekKey && carryOverTeam.length > 0) {
+                    weeklyShiftTeam = [...carryOverTeam];
+                    isFirstWeek = false;
+
+                    weekServices.forEach((s: any) => {
+                        generatedShifts.push({
+                            date: s.date,
+                            dayName: s.dayName,
+                            team: [...weeklyShiftTeam]
+                        });
+                    });
+                    return;
                 }
 
-                const finalTeamMembers = assignedTeamName ? teamsMap[assignedTeamName as string] : ['SEM EQUIPE (Restrições)'];
+                isFirstWeek = false;
 
+                const sortedVocals = [...vocalTeams].sort((a, b) => {
+                    const countA = vocalUsageCount[a] || 0;
+                    const countB = vocalUsageCount[b] || 0;
+                    if (countA !== countB) return countA - countB;
+                    return Math.random() - 0.5;
+                });
+
+                const sortedBands = [...bandTeams].sort((a, b) => {
+                    const countA = bandUsageCount[a] || 0;
+                    const countB = bandUsageCount[b] || 0;
+                    if (countA !== countB) return countA - countB;
+                    return Math.random() - 0.5;
+                });
+
+                let assignedVocalTeamName: string | null = null;
+                let assignedBandTeamName: string | null = null;
+
+                // Busca um Grupo Vocal disponível para a semana inteira (Domingo e Quinta)
+                for (const candidateVocal of sortedVocals) {
+                    const vocalMembers = teamsMap[candidateVocal] || [];
+                    const isAvailable = weekServices.every((s: any) =>
+                        !restrictions?.some((r: any) => vocalMembers.some(m => m.name === r.member) && r.date === s.rawDate)
+                    );
+
+                    if (isAvailable) {
+                        assignedVocalTeamName = candidateVocal;
+                        // 👇 CORREÇÃO: Incremento seguro
+                        vocalUsageCount[candidateVocal] = (vocalUsageCount[candidateVocal] || 0) + 1;
+                        break;
+                    }
+                }
+
+                // Busca uma Banda disponível para a semana inteira
+                for (const candidateBand of sortedBands) {
+                    const bandMembers = teamsMap[candidateBand] || [];
+                    const isAvailable = weekServices.every((s: any) =>
+                        !restrictions?.some((r: any) => bandMembers.some(m => m.name === r.member) && r.date === s.rawDate)
+                    );
+
+                    if (isAvailable) {
+                        assignedBandTeamName = candidateBand;
+                        // 👇 CORREÇÃO: Incremento seguro
+                        bandUsageCount[candidateBand] = (bandUsageCount[candidateBand] || 0) + 1;
+                        break;
+                    }
+                }
+
+                // Monta a equipe fundindo o Vocal sorteado e a Banda sorteada
+                if (assignedVocalTeamName) {
+                    const vocals = teamsMap[assignedVocalTeamName] || [];
+                    vocals.forEach(v => weeklyShiftTeam.push(`${v.name} (${v.role || 'Vocal'})`));
+                } else {
+                    weeklyShiftTeam.push('⚠️ SEM VOCAL (Restrições)');
+                }
+
+                if (assignedBandTeamName) {
+                    const bandMembers = teamsMap[assignedBandTeamName] || [];
+                    bandMembers.forEach(b => weeklyShiftTeam.push(`${b.name} (${b.role || 'Banda'})`));
+                } else {
+                    weeklyShiftTeam.push('⚠️ SEM BANDA (Restrições)');
+                }
+
+                // Replica a equipe combinada para todos os cultos do bloco
                 weekServices.forEach((s: any) => {
-                    generatedShifts.push({ date: s.date, dayName: s.dayName, team: finalTeamMembers });
+                    generatedShifts.push({
+                        date: s.date,
+                        dayName: s.dayName,
+                        team: [...weeklyShiftTeam]
+                    });
                 });
             });
         }

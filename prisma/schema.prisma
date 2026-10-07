@@ -825,3 +825,36 @@ model AuditLog {
   // 👇 ADICIONE ESTA LINHA PARA RESOLVER O ERRO 👇
   @@schema("app") 
 }
+
+model GalleryAlbum {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  title       String    @db.VarChar(255) // Ex: "Santa Ceia" ou "Culto de Jovens"
+  event_date  DateTime  @db.Date         // A data real em que o culto aconteceu
+  cover_url   String?   @db.Text         // Uma foto de capa para a listagem (opcional)
+  
+  is_active   Boolean   @default(true)   // Para ocultar o álbum manualmente, se necessário
+  is_expired  Boolean   @default(false)  // O robô mudará para 'true' após os 7 dias
+  expires_at  DateTime  @db.Timestamptz(3) // Data e hora exata em que o álbum deve expirar
+
+  photos      GalleryPhoto[]
+
+  created_at  DateTime? @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime? @updatedAt @db.Timestamptz(3)
+
+  @@map("gallery_albums")
+  @@schema("app")
+}
+
+model GalleryPhoto {
+  id          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  
+  album_id    String       @db.Uuid
+  album       GalleryAlbum @relation(fields: [album_id], references: [id], onDelete: Cascade)
+  
+  image_url   String       @db.Text // URL pública da foto no seu MinIO (ibnh-galeria)
+
+  created_at  DateTime?    @default(now()) @db.Timestamptz(3)
+
+  @@map("gallery_photos")
+  @@schema("app")
+}

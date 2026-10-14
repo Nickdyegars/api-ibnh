@@ -1,29 +1,61 @@
 // src/modules/upload/upload.routes.ts
-import { FastifyInstance } from 'fastify';
-import { uploadImage } from '../../shared/storage/minio.js'; // Ajuste o caminho se necessário
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { uploadImage } from '../../shared/storage/minio.js';
 
 export async function uploadRoutes(app: FastifyInstance) {
-  
-  app.post('/', async (request, reply) => {
+
+  // Requer autenticação (Painel Administrativo: Galeria e CMS)
+  app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      // Recebe o arquivo do React
-      const data = await request.file();
-      
-      if (!data) {
+      await request.jwtVerify();
+    } catch (err) {
+      return reply.status(401).send({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
+    }
+  });
+
+  app.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parts = request.parts();
+      let fileData: { filename: string; buffer: Buffer; mimetype: string } | null = null;
+      let folder = 'galeria';
+
+      const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+
+      for await (const part of parts) {
+        if (part.type === 'file') {
+          if (!allowedMimeTypes.includes(part.mimetype)) {
+            return reply.status(400).send({
+              error: `Formato de arquivo não permitido: ${part.mimetype}. Envie apenas imagens JPG, PNG ou WEBP.`
+            });
+          }
+
+          const buffer = await part.toBuffer();
+          if (buffer.length === 0) {
+            return reply.status(400).send({ error: 'O arquivo enviado está vazio.' });
+          }
+
+          fileData = {
+            filename: part.filename,
+            buffer,
+            mimetype: part.mimetype
+          };
+        } else if (part.type === 'field' && part.fieldname === 'folder' && typeof part.value === 'string') {
+          // Permite passar pasta personalizada (ex: 'cms', 'galeria', etc.)
+          folder = part.value.trim() || 'galeria';
+        }
+      }
+
+      if (!fileData) {
         return reply.status(400).send({ error: 'Nenhum arquivo enviado.' });
       }
 
-      const fileBuffer = await data.toBuffer();
-      
-      // Usa a sua função existente e cria uma sub-pasta "galeria" no bucket
       const publicUrl = await uploadImage(
-        data.filename, 
-        fileBuffer, 
-        data.mimetype, 
-        'galeria' // 👈 Ficará tudo organizado na pasta /galeria dentro do seu bucket
+        fileData.filename,
+        fileData.buffer,
+        fileData.mimetype,
+        folder
       );
 
-      // O Front-end está esperando { url: '...' }
       return reply.status(201).send({ url: publicUrl });
 
     } catch (error) {

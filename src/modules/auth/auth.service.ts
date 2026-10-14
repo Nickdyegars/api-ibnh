@@ -48,8 +48,8 @@ export class AuthService {
   async getUsers() {
     const users = await prisma.user.findMany({
       include: { profile: true },
-      // Opcional: ordenar pelos mais recentes
-      orderBy: { id: 'desc' }
+      // Ordenar pelos mais recentes
+      orderBy: { created_at: 'desc' }
     });
 
     // Formatamos para o frontend entender facilmente

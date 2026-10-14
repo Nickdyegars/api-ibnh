@@ -1,8 +1,6 @@
-// src/modules/rosters/roster.controller.ts
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { RosterService } from './roster.service.js';
 import { getRostersQuerySchema, createRosterBodySchema } from './roster.schemas.js';
-import { prisma } from '../../shared/database/prisma.js';
 // 👇 Importando o nosso serviço de Auditoria
 import { AuditService } from '../../shared/services/audit/audit.service.js';
 
@@ -79,10 +77,7 @@ export class RosterController {
 
             // === TRAVA DE SEGURANÇA (RBAC) ===
             if (user.level > 0) {
-                const schedule = await prisma.schedule.findUnique({
-                    where: { id },
-                    include: { ministry: true }
-                });
+                const schedule = await rosterService.findScheduleById(id);
 
                 if (!schedule) return reply.status(404).send({ error: 'Escala não encontrada.' });
 
@@ -117,10 +112,7 @@ export class RosterController {
             const { shiftId } = request.params as { shiftId: string };
             const { team } = request.body as { team: string[] };
 
-            const shift = await prisma.shift.findUnique({
-                where: { id: shiftId },
-                include: { schedule: { include: { ministry: true } } }
-            });
+            const shift = await rosterService.findShiftById(shiftId);
 
             if (!shift) return reply.status(404).send({ error: "Turno não encontrado" });
 

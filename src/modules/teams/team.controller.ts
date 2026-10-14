@@ -57,19 +57,26 @@ export class TeamController {
             const user = request.user as any;
             const { id } = request.params as { id: string };
 
-            // === TRAVA DE SEGURANÇA ===
+            const team = await teamService.findById(id);
+            if (!team) {
+                return reply.status(404).send({ error: 'Equipe não encontrada.' });
+            }
+
+            // === TRAVA DE SEGURANÇA RBAC DINÂMICA ===
             if (user.level > 0) {
                 const userMinistryName = user.ministry_access || user.ministry || '';
-                if (userMinistryName !== 'Louvor') {
-                    return reply.status(403).send({ error: 'Acesso negado.' });
+                if (userMinistryName !== 'all' && userMinistryName !== team.ministry?.name) {
+                    return reply.status(403).send({ 
+                        error: `Acesso negado: Você não tem permissão para apagar equipes do ministério ${team.ministry?.name}.` 
+                    });
                 }
             }
-            // ==========================
+            // =========================================
 
             await teamService.deleteTeam(id);
 
             // 📝 LOG: Remoção de banda/equipe do sistema
-            AuditService.log(user.sub, 'DELETE', 'TEAM', id);
+            AuditService.log(user.sub, 'DELETE', 'TEAM', id, { name: team.name, ministry: team.ministry?.name });
 
             return reply.send({ message: 'Equipe apagada com sucesso' });
         } catch (error: any) {

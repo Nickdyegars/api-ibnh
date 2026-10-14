@@ -1,5 +1,19 @@
 import { prisma } from '../../shared/database/prisma.js';
 import { deleteImage } from '../../shared/storage/minio.js';
+import {
+    UpdateAboutType,
+    UpdateContactsType,
+    ProgramType,
+    UpdateProgramType,
+    PastorType,
+    UpdatePastorType,
+    CellType,
+    UpdateCellType,
+    SiteMinistryType,
+    UpdateSiteMinistryType,
+    ProjectType,
+    UpdateProjectType
+} from './cms.schemas.js';
 
 export class CmsService {
 
@@ -18,18 +32,16 @@ export class CmsService {
         return about;
     }
 
-    async updateAbout(data: any) {
+    async updateAbout(data: UpdateAboutType) {
         const current = await this.getAbout();
 
-        // 1. Verifica se existe uma foto velha, e se a nova foto for diferente, apaga a velha do MinIO!
         if (current && current.image_url && data.image_url && current.image_url !== data.image_url) {
             await deleteImage(current.image_url);
         }
 
-        // 2. Atualiza os dados no banco
         return await prisma.siteAbout.update({
             where: { id: current.id },
-            data
+            data: data as any
         });
     }
 
@@ -44,11 +56,11 @@ export class CmsService {
         return contacts;
     }
 
-    async updateContacts(data: any) {
+    async updateContacts(data: UpdateContactsType) {
         const current = await this.getContacts();
         return await prisma.siteContact.update({
             where: { id: current.id },
-            data
+            data: data as any
         });
     }
 
@@ -59,14 +71,14 @@ export class CmsService {
         return await prisma.siteProgram.findMany({ orderBy: { order: 'asc' } });
     }
 
-    async createProgram(data: any) {
-        return await prisma.siteProgram.create({ data });
+    async createProgram(data: ProgramType) {
+        return await prisma.siteProgram.create({ data: data as any });
     }
 
-    async updateProgram(id: string, data: any) {
+    async updateProgram(id: string, data: UpdateProgramType) {
         return await prisma.siteProgram.update({
             where: { id },
-            data
+            data: data as any
         });
     }
 
@@ -83,36 +95,30 @@ export class CmsService {
         return await prisma.sitePastor.findMany({ orderBy: { order: 'asc' } });
     }
 
-    async createPastor(data: any) {
-        return await prisma.sitePastor.create({ data });
+    async createPastor(data: PastorType) {
+        return await prisma.sitePastor.create({ data: data as any });
     }
 
-    async updatePastor(id: string, data: any) {
-        // 1. Procura o pastor atual no banco
+    async updatePastor(id: string, data: UpdatePastorType) {
         const pastorAtual = await prisma.sitePastor.findUnique({ where: { id } });
 
-        // 2. Se houver uma imagem antiga, e a nova imagem que veio no 'data' for diferente, apaga a velha!
         if (pastorAtual && pastorAtual.image_url && data.image_url && pastorAtual.image_url !== data.image_url) {
             await deleteImage(pastorAtual.image_url);
         }
 
-        // 3. Atualiza na base de dados normalmente
         return await prisma.sitePastor.update({
             where: { id },
-            data
+            data: data as any
         });
     }
 
     async deletePastor(id: string) {
-        // 1. Procura o pastor para saber se ele tem foto
         const pastorAtual = await prisma.sitePastor.findUnique({ where: { id } });
 
-        // 2. Se tiver foto, apaga do MinIO primeiro
         if (pastorAtual && pastorAtual.image_url) {
             await deleteImage(pastorAtual.image_url);
         }
 
-        // 3. Depois elimina o registo do banco
         return await prisma.sitePastor.delete({
             where: { id }
         });
@@ -125,11 +131,11 @@ export class CmsService {
         return await prisma.siteCell.findMany({ orderBy: { order: 'asc' } });
     }
 
-    async createCell(data: any) {
-        return await prisma.siteCell.create({ data });
+    async createCell(data: CellType) {
+        return await prisma.siteCell.create({ data: data as any });
     }
 
-    async updateCell(id: string, data: any) {
+    async updateCell(id: string, data: UpdateCellType) {
         const celulaAtual = await prisma.siteCell.findUnique({ where: { id } });
 
         if (celulaAtual && celulaAtual.image_url && data.image_url && celulaAtual.image_url !== data.image_url) {
@@ -138,7 +144,7 @@ export class CmsService {
 
         return await prisma.siteCell.update({
             where: { id },
-            data
+            data: data as any
         });
     }
 
@@ -161,36 +167,30 @@ export class CmsService {
         return await prisma.siteMinistry.findMany({ orderBy: { order: 'asc' } });
     }
 
-    async createMinistry(data: any) {
-        return await prisma.siteMinistry.create({ data });
+    async createMinistry(data: SiteMinistryType) {
+        return await prisma.siteMinistry.create({ data: data as any });
     }
 
-    async updateMinistry(id: string, data: any) {
-        // 1. Procura o ministério atual para saber a foto antiga
+    async updateMinistry(id: string, data: UpdateSiteMinistryType) {
         const ministerioAtual = await prisma.siteMinistry.findUnique({ where: { id } });
 
-        // 2. Se houver uma foto antiga, e a nova foto for diferente, apaga a velha do MinIO!
         if (ministerioAtual && ministerioAtual.image_url && data.image_url && ministerioAtual.image_url !== data.image_url) {
             await deleteImage(ministerioAtual.image_url);
         }
 
-        // 3. Atualiza os dados no banco
         return await prisma.siteMinistry.update({
             where: { id },
-            data
+            data: data as any
         });
     }
 
     async deleteMinistry(id: string) {
-        // 1. Procura o ministério primeiro
         const ministerioAtual = await prisma.siteMinistry.findUnique({ where: { id } });
 
-        // 2. Se ele tiver uma foto, detona ela do MinIO
         if (ministerioAtual && ministerioAtual.image_url) {
             await deleteImage(ministerioAtual.image_url);
         }
 
-        // 3. Só depois apaga o registo do banco de dados
         return await prisma.siteMinistry.delete({
             where: { id }
         });
@@ -203,28 +203,26 @@ export class CmsService {
         return await prisma.siteProject.findMany({ orderBy: { order: 'asc' } });
     }
 
-    async createProject(data: any) {
-        return await prisma.siteProject.create({ data });
+    async createProject(data: ProjectType) {
+        return await prisma.siteProject.create({ data: data as any });
     }
 
-    async updateProject(id: string, data: any) {
+    async updateProject(id: string, data: UpdateProjectType) {
         const projetoAtual = await prisma.siteProject.findUnique({ where: { id } });
 
-        // Se houver uma foto antiga, e a nova for diferente, apaga a velha do MinIO!
         if (projetoAtual && projetoAtual.image_url && data.image_url && projetoAtual.image_url !== data.image_url) {
             await deleteImage(projetoAtual.image_url);
         }
 
         return await prisma.siteProject.update({
             where: { id },
-            data
+            data: data as any
         });
     }
 
     async deleteProject(id: string) {
         const projetoAtual = await prisma.siteProject.findUnique({ where: { id } });
 
-        // Se o projeto tiver uma foto, apaga do MinIO antes de excluir do banco
         if (projetoAtual && projetoAtual.image_url) {
             await deleteImage(projetoAtual.image_url);
         }

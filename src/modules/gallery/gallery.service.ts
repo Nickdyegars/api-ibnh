@@ -61,8 +61,38 @@ export class GalleryService {
   }
 
   async deleteAlbum(id: string) {
-    return await prisma.galleryAlbum.delete({
+    const album = await prisma.galleryAlbum.findUnique({
       where: { id },
+      include: { photos: true },
+    });
+
+    if (!album) {
+      throw new Error("Álbum não encontrado.");
+    }
+
+    // 1. Apaga a imagem de capa do MinIO se existir
+    if (album.cover_url) {
+      await deleteImage(album.cover_url);
+    }
+
+    // 2. Apaga todas as fotos do álbum do MinIO
+    if (album.photos && album.photos.length > 0) {
+      for (const photo of album.photos) {
+        if (photo.image_url) {
+          await deleteImage(photo.image_url);
+        }
+      }
+    }
+
+    // 3. Apaga as fotos e o álbum no banco de dados em transação
+    return await prisma.$transaction(async (tx) => {
+      await tx.galleryPhoto.deleteMany({
+        where: { album_id: id },
+      });
+
+      return await tx.galleryAlbum.delete({
+        where: { id },
+      });
     });
   }
 
@@ -85,6 +115,14 @@ export class GalleryService {
   }
 
   async deletePhoto(photoId: string) {
+    const photo = await prisma.galleryPhoto.findUnique({
+      where: { id: photoId },
+    });
+
+    if (photo && photo.image_url) {
+      await deleteImage(photo.image_url);
+    }
+
     return await prisma.galleryPhoto.delete({
       where: { id: photoId },
     });

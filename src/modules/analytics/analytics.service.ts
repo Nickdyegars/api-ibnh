@@ -48,7 +48,7 @@ export class AnalyticsService {
                 dateKey = `${d.getHours()}h`; // Ex: 14h, 15h
             } else if (period === 'ano') {
                 const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-                dateKey = monthNames[d.getMonth()]; // Ex: Jan, Fev
+                dateKey = monthNames[d.getMonth()] ?? ''; // Ex: Jan, Fev
             } else {
                 // Semana ou Mês (Ex: 05/03)
                 const day = String(d.getDate()).padStart(2, '0');

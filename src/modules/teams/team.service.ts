@@ -32,6 +32,13 @@ export class TeamService {
     });
   }
 
+  async findById(id: string) {
+    return await prisma.team.findUnique({
+      where: { id },
+      include: { ministry: true }
+    });
+  }
+
   async deleteTeam(id: string) {
     await prisma.team.delete({ 
         where: { id } 

@@ -21,6 +21,7 @@ import { teamRoutes } from './modules/teams/team.routes.js';
 import { ecdWorkersRoutes } from './modules/ecd-workers/ecd-workers.routes.js';
 import { areaRoutes } from './modules/area/area.routes.js';
 import { galleryRoutes } from './modules/gallery/gallery.routes.js';
+import { GalleryService } from './modules/gallery/gallery.service.js';
 import { uploadRoutes } from './modules/upload/upload.routes.js';
 import fastifyRateLimit from '@fastify/rate-limit';
 
@@ -56,21 +57,28 @@ app.register(helmet, {
   }
 });
 
-// app.register(cors, {
-//   origin: [
-//     "https://painel.ibnhitamaraju.com.br",
-//     "https://ibnhitamaraju.com.br",
-//     "http://localhost:5173",
-//     "http://localhost:5174" // Seu ambiente local do Vite
-//   ],
-//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Libera os métodos
-//   allowedHeaders: ['Content-Type', 'Authorization'] // Libera o envio do Token
-// });
+const allowedOrigins = [
+  "https://painel.ibnhitamaraju.com.br",
+  "https://ibnhitamaraju.com.br",
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:3000"
+];
 
 app.register(cors, {
-  origin: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Libera os métodos
-  allowedHeaders: ['Content-Type', 'Authorization'] // Libera o envio do Token
+  origin: (origin, cb) => {
+    // Permite chamadas sem origin (apps móveis, curl, requisições internas do mesmo host)
+    if (!origin) return cb(null, true);
+
+    if (process.env.NODE_ENV !== 'production' || allowedOrigins.includes(origin)) {
+      return cb(null, true);
+    }
+
+    return cb(new Error('Origem não permitida por CORS'), false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 });
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -93,6 +101,23 @@ app.register(multipart, {
 
 app.addHook('onReady', async () => {
   await setupMinioBucket();
+
+  // Rotina de limpeza automática de fotos/álbuns expirados (7 dias)
+  try {
+    const galleryService = new GalleryService();
+    await galleryService.cleanupExpiredAlbums();
+
+    // Executa a cada 1 hora em segundo plano
+    setInterval(async () => {
+      try {
+        await galleryService.cleanupExpiredAlbums();
+      } catch (err) {
+        app.log.error(err, 'Erro ao executar rotina periódica de limpeza da galeria');
+      }
+    }, 60 * 60 * 1000);
+  } catch (err) {
+    app.log.error(err, 'Erro ao inicializar rotina de limpeza da galeria');
+  }
 });
 
 // Registra as nossas rotas de autenticação (ficarão em /auth/login)
@@ -120,6 +145,37 @@ app.register(async function apiV1(v1) {
   v1.register(uploadRoutes, { prefix: '/upload' });
 
 }, { prefix: '/v1' }); // 👈 O prefixo global entra aqui!
+
+app.setErrorHandler((error: any, request, reply) => {
+  // Trata erros de validação do Zod
+  if (error.name === 'ZodError') {
+    const zodError = error as any;
+    return reply.status(400).send({
+      error: zodError.errors?.[0]?.message || 'Dados inválidos fornecidos.'
+    });
+  }
+
+  // Trata erros de JWT do Fastify
+  if (error.statusCode === 401 || (error as any).code === 'FST_JWT_NO_AUTHORIZATION_IN_HEADER') {
+    return reply.status(401).send({
+      error: 'Não autorizado. Faça login novamente.'
+    });
+  }
+
+  // Trata erro de Rate Limit
+  if (error.statusCode === 429) {
+    return reply.status(429).send({
+      error: 'Você fez muitas requisições. Tente novamente em 1 minuto.'
+    });
+  }
+
+  app.log.error(error);
+
+  const statusCode = error.statusCode || 500;
+  return reply.status(statusCode).send({
+    error: statusCode === 500 ? 'Erro interno no servidor.' : error.message
+  });
+});
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', message: 'API rodando! 🚀' };

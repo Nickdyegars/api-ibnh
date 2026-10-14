@@ -4,9 +4,6 @@ import { EcdService } from './ecd.service.js';
 import { registerEcdSchema, editionEcdSchema } from './ecd.schemas.js';
 // 👇 Importando o nosso serviço de Auditoria
 import { AuditService } from '../../shared/services/audit/audit.service.js';
-import PDFDocument from 'pdfkit';
-import { prisma } from '../../shared/database/prisma.js';
-import { deleteImage } from '../../shared/storage/minio.js'; // Ajuste o caminho das pastas se necessário
 
 const ecdService = new EcdService();
 
@@ -314,175 +311,18 @@ export class EcdController {
     const { id } = request.params;
 
     try {
-      const edition = await prisma.ecdEdition.findUnique({
-        where: { id }
-      });
+      const result = await ecdService.generateEditionReportPdf(id);
 
-      if (!edition) {
+      if (!result) {
         return reply.status(404).send({ error: "Edição não encontrada." });
       }
 
-      // 1. Busca Trabalhadores
-      const workers = await prisma.ecdWorkerRegistration.findMany({
-        where: { edition_id: id, status: 'APROVADO' },
-        select: {
-          full_name: true,
-          gender: true,
-          age: true,
-          phone: true,
-          area: { select: { name: true } },
-          leader: { select: { name: true } }
-        },
-        orderBy: { area: { name: 'asc' } }
-      });
-
-      // 2. Busca Encontristas ativos
-      const attendees = await prisma.ecdRegistration.findMany({
-        where: { edition_id: id, status: 'ATIVO' },
-        select: {
-          full_name: true,
-          gender: true,
-          age: true,
-          phone: true,
-          in_cell: true,
-          cell_leader_name: true,
-          invited_by: true,
-          leader: { select: { name: true } }
-        },
-        orderBy: { full_name: 'asc' }
-      });
-
-      const doc = new PDFDocument({
-        size: 'A4',
-        bufferPages: true,
-        margins: { top: 40, left: 40, right: 40, bottom: 10 }
-      });
+      const { doc, editionName } = result;
 
       reply.header('Content-Type', 'application/pdf');
-      reply.header('Content-Disposition', `attachment; filename="Relatorio-${edition.name.replace(/\s+/g, '-')}.pdf"`);
+      reply.header('Content-Disposition', `attachment; filename="Relatorio-${editionName.replace(/\s+/g, '-')}.pdf"`);
 
-      reply.send(doc);
-
-      // HELPER DE TABELA
-      const drawTableRow = (c1: string, c2: string, c3: string, c4: string, isHeader = false) => {
-        if (doc.y > 750) {
-          doc.addPage();
-          doc.y = 40;
-        }
-
-        const y = doc.y;
-        doc.font(isHeader ? 'Helvetica-Bold' : 'Helvetica').fontSize(isHeader ? 10 : 9);
-        doc.fillColor(isHeader ? '#1e3a8a' : '#334155');
-
-        doc.text(c1, 40, y, { width: 175, height: 15, lineBreak: false, ellipsis: true });
-        doc.text(c2, 220, y, { width: 75, height: 15, lineBreak: false, ellipsis: true });
-        doc.text(c3, 300, y, { width: 85, height: 15, lineBreak: false, ellipsis: true });
-        doc.text(c4, 390, y, { width: 165, height: 15, lineBreak: false, ellipsis: true });
-
-        doc.moveTo(40, y + 14).lineTo(555, y + 14).strokeColor(isHeader ? '#cbd5e1' : '#f1f5f9').lineWidth(1).stroke();
-        doc.y = y + 20;
-      };
-
-      // LAYOUT CABEÇALHO
-      doc.rect(0, 0, doc.page.width, 15).fill('#1e3a8a');
-      doc.moveDown(1.5);
-
-      doc.fillColor('#1e293b').fontSize(22).font('Helvetica-Bold')
-        .text('RELATÓRIO DE ENCERRAMENTO', { align: 'center', characterSpacing: 1 });
-
-      doc.fontSize(14).font('Helvetica').fillColor('#475569')
-        .text(edition.name.toUpperCase(), { align: 'center' });
-
-      doc.moveDown(1);
-      doc.moveTo(40, doc.y).lineTo(doc.page.width - 40, doc.y).strokeColor('#e2e8f0').lineWidth(1).stroke();
-      doc.moveDown(1.5);
-
-      // CARD RESUMO
-      const startY = doc.y;
-      doc.rect(40, startY, doc.page.width - 80, 55).fill('#f8fafc');
-      doc.rect(40, startY, doc.page.width - 80, 55).strokeColor('#cbd5e1').stroke();
-
-      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(11).text('RESUMO DO EVENTO', 55, startY + 10);
-      doc.font('Helvetica').fontSize(10).fillColor('#475569');
-      doc.text(`Total de Voluntários / Equipe: `, 55, startY + 28);
-      doc.font('Helvetica-Bold').text(`${workers.length}`, 210, startY + 28);
-
-      doc.font('Helvetica').text(`Total de Encontristas: `, 300, startY + 28);
-      doc.font('Helvetica-Bold').text(`${attendees.length}`, 410, startY + 28);
-
-      doc.x = 40;
-      doc.y = startY + 75;
-
-      // SEÇÃO TRABALHADORES
-      doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(14).text('EQUIPE E TRABALHADORES ALOCADOS');
-      doc.moveDown(0.8);
-
-      if (workers.length === 0) {
-        doc.font('Helvetica-Oblique').fontSize(10).fillColor('#94a3b8').text('Nenhum trabalhador aprovado nesta edição.');
-        doc.moveDown(2);
-      } else {
-        let currentArea = '';
-        workers.forEach((worker) => {
-          const areaName = worker.area?.name || 'Sem Área';
-          if (areaName !== currentArea) {
-            doc.moveDown(0.5);
-            doc.fillColor('#2563eb').font('Helvetica-Bold').fontSize(11).text(`■ ÁREA: ${areaName.toUpperCase()}`);
-            doc.moveDown(0.3);
-            drawTableRow('Nome do Voluntário', 'Perfil', 'Contato', 'Líder Direto', true);
-            currentArea = areaName;
-          }
-          const leaderName = worker.leader?.name || '-';
-          const phone = worker.phone || '-';
-          const profile = `${worker.age} anos | ${worker.gender === 'M' ? 'Masc' : 'Fem'}`;
-          drawTableRow(`• ${worker.full_name}`, profile, phone, leaderName);
-        });
-      }
-
-      doc.moveDown(2);
-
-      // 👇 RESET DO CURSOR PARA EVITAR O TITULO QUEBRADO NA DIREITA 👇
-      doc.x = 40;
-      doc.fillColor('#1e3a8a').font('Helvetica-Bold').fontSize(14).text('LISTA FINAL DE ENCONTRISTAS', { width: 515 });
-      doc.moveDown(0.8);
-
-      if (attendees.length === 0) {
-        doc.font('Helvetica-Oblique').fontSize(10).fillColor('#94a3b8').text('Nenhum encontrista encontrado ou ativo nesta edição.');
-      } else {
-        drawTableRow('Nome do Encontrista', 'Perfil', 'Contato', 'Origem (Célula / Convite)', true);
-
-        attendees.forEach((attendee, index) => {
-          const phone = attendee.phone || '-';
-          const profile = `${attendee.age} anos | ${attendee.gender === 'M' ? 'Masc' : 'Fem'}`;
-
-          let origin = '-';
-          if (attendee.cell_leader_name && attendee.cell_leader_name !== 'Origem Desconhecida') {
-            origin = `Célula: ${attendee.cell_leader_name}`;
-          } else if (attendee.leader?.name) {
-            origin = `Líder: ${attendee.leader.name}`;
-          } else if (attendee.invited_by) {
-            origin = `Convite: ${attendee.invited_by}`;
-          }
-
-          drawTableRow(`${index + 1}. ${attendee.full_name}`, profile, phone, origin);
-        });
-      }
-
-      // RODAPÉ
-      const totalPages = doc.bufferedPageRange().count;
-      for (let i = 0; i < totalPages; i++) {
-        doc.switchToPage(i);
-        doc.fontSize(8).fillColor('#94a3b8').text(
-          `Gerado em ${new Date().toLocaleDateString('pt-BR')} | IBNH Painel - Página ${i + 1} de ${totalPages}`,
-          40,
-          doc.page.height - 30,
-          { align: 'center' }
-        );
-      }
-
-      doc.flushPages();
-      doc.end();
-      return reply;
-
+      return reply.send(doc);
     } catch (error) {
       console.error("Erro ao gerar PDF:", error);
       if (!reply.sent) {
@@ -495,201 +335,25 @@ export class EcdController {
     const { id } = request.params;
 
     try {
-      const edition = await prisma.ecdEdition.findUnique({
-        where: { id }
-      });
-
-      if (!edition) return reply.status(404).send({ error: "Edição não encontrada." });
-
-      // 1. Busca os Trabalhadores (Agora incluindo as fotos)
-      const workers = await prisma.ecdWorkerRegistration.findMany({
-        where: { edition_id: id },
-        select: {
-          full_name: true,
-          phone: true,
-          area: { select: { name: true } },
-          leader: { select: { name: true } },
-          profile_photo_url: true,
-          status: true
-        }
-      });
-
-      // 2. Busca os Encontristas (Agora incluindo as fotos)
-      const attendees = await prisma.ecdRegistration.findMany({
-        where: { edition_id: id },
-        select: {
-          full_name: true,
-          gender: true,
-          age: true,
-          phone: true,
-          in_cell: true,
-          cell_leader_name: true,
-          invited_by: true,
-          leader: { select: { name: true } },
-          profile_photo_url: true,
-          receipt_photo_url: true,
-          status: true
-        }
-      });
-
-      const areaLeaders = await prisma.ecdWorkerLeader.findMany({
-        where: { edition_id: id },
-        select: {
-          name: true,
-          area: { select: { name: true } }
-        }
-      });
-
-      const cellLeaders = await prisma.ecdLeader.findMany({
-        where: { editionId: id },
-        include: { cell: true } // Isso traz os dados da célula amarrada!
-      });
-
-      // Filtra apenas os "ATIVOS" / "APROVADOS" para salvar no JSON Histórico
-      const approvedWorkers = workers.filter(w => w.status === 'APROVADO');
-      const activeAttendees = attendees.filter(a => a.status === 'ATIVO');
-
-      const workersSnapshot = approvedWorkers.map(w => ({
-        full_name: w.full_name,
-        phone: w.phone || 'Sem número',
-        area_name: w.area?.name || 'Sem Área',
-        leader_name: w.leader?.name || 'N/A'
-      }));
-
-      const attendeesSnapshot = activeAttendees.map(a => {
-        let origin = 'Não informado';
-
-        // Lógica robusta em cascata
-        if (a.cell_leader_name && a.cell_leader_name !== 'Origem Desconhecida') {
-          origin = `Célula: ${a.cell_leader_name}`;
-        } else if (a.leader?.name) {
-          origin = `Líder: ${a.leader.name}`;
-        } else if (a.invited_by) {
-          origin = `Convite: ${a.invited_by}`;
-        }
-
-        return {
-          full_name: a.full_name,
-          gender: a.gender,
-          age: a.age,
-          phone: a.phone || 'Sem número',
-          origin: origin
-        };
-      });
-
-      const areaLeadersSnapshot = areaLeaders.map(al => {
-        // Conta quantos voluntários aprovados têm este líder como líder direto
-        const countLiderados = approvedWorkers.filter(w => w.leader?.name === al.name).length;
-
-        return {
-          name: al.name,
-          area_name: al.area?.name || 'Sem Área',
-          workers_count: countLiderados
-        };
-      });
-
-      const leadersSlotsSnapshot = cellLeaders.map(l => {
-        // Lógica para descobrir o nome real do líder
-        let leaderName = l.name;
-        if (l.cell) {
-          leaderName = `${l.cell.leader} (${l.cell.name})`;
-        }
-
-        return {
-          name: leaderName || 'Líder Não Identificado',
-          total_yellow: l.totalYellowSlots || 0,
-          used_yellow: l.usedYellowSlots || 0,
-          total_green: l.totalGreenSlots || 0,
-          used_green: l.usedGreenSlots || 0
-        };
-      });
-
-      // 3. SEPARA TODAS AS URLs DE FOTOS PARA DELEÇÃO
-      const filesToDelete: string[] = [];
-
-      workers.forEach(w => {
-        if (w.profile_photo_url) filesToDelete.push(w.profile_photo_url);
-      });
-
-      attendees.forEach(a => {
-        if (a.profile_photo_url) filesToDelete.push(a.profile_photo_url);
-        if (a.receipt_photo_url) filesToDelete.push(a.receipt_photo_url);
-      });
-
-      // 4. Executa a Transação no Banco de Dados
-      await prisma.$transaction(async (tx) => {
-
-        // A) Salva tudo no Histórico
-        await tx.ecdEditionHistory.upsert({
-          where: { edition_id: id },
-          create: {
-            edition_id: id,
-            edition_name: edition.name,
-            total_workers: workersSnapshot.length,
-            total_attendees: attendeesSnapshot.length,
-            workers_data: workersSnapshot,
-            attendees_data: attendeesSnapshot,
-            area_leaders_data: areaLeadersSnapshot,
-            leaders_slots_data: leadersSlotsSnapshot
-          },
-          update: {
-            edition_name: edition.name,
-            total_workers: workersSnapshot.length,
-            total_attendees: attendeesSnapshot.length,
-            workers_data: workersSnapshot,
-            attendees_data: attendeesSnapshot,
-            area_leaders_data: areaLeadersSnapshot,
-            leaders_slots_data: leadersSlotsSnapshot
-          }
-        });
-
-        // B) Limpeza dos Links (Tokens)
-        await tx.ecdToken.deleteMany({
-          where: { editionId: id } // 👈 Muito mais limpo e direto!
-        });
-
-        // C) Limpeza das Fichas e Registros
-        await tx.ecdRegistration.deleteMany({ where: { edition_id: id } });
-        await tx.ecdWorkerRegistration.deleteMany({ where: { edition_id: id } });
-
-        // D) Limpeza das Cotas dos Líderes
-        await tx.ecdLeader.deleteMany({ where: { editionId: id } });
-        await tx.ecdWorkerLeader.deleteMany({ where: { edition_id: id } });
-
-        // E) Desativa a Edição
-        await tx.ecdEdition.update({ where: { id }, data: { is_active: false } });
-
-        // 👇 AQUI ESTÁ A CORREÇÃO DE TEMPO MÁXIMO 👇
-      }, {
-        maxWait: 10000, // 10 segundos de espera máxima para iniciar
-        timeout: 30000  // 30 segundos de limite para executar tudo
-      });
-
-      // 5. TRITURAÇÃO FÍSICA DOS ARQUIVOS NO MINIO (Assíncrono)
-      if (filesToDelete.length > 0) {
-        Promise.allSettled(filesToDelete.map(url => deleteImage(url)))
-          .then(() => console.log(`[STORAGE] Limpeza concluída: ${filesToDelete.length} imagens enfileiradas para exclusão no MinIO.`))
-          .catch(err => console.error("[STORAGE] Erro na fila de limpeza do MinIO:", err));
-      }
+      const summary = await ecdService.finishAndArchiveEdition(id);
 
       return reply.send({
         success: true,
         message: "Edição finalizada com sucesso! Dados migrados, registros limpos e mídias descartadas.",
-        summary: { workers_saved: workersSnapshot.length, attendees_saved: attendeesSnapshot.length }
+        summary
       });
-
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro crítico ao finalizar edição:", error);
+      if (error.message === "Edição não encontrada.") {
+        return reply.status(404).send({ error: error.message });
+      }
       return reply.status(500).send({ error: "Erro interno ao processar encerramento da edição." });
     }
   }
 
   async getEditionHistory(request: any, reply: any) {
     try {
-      const history = await prisma.ecdEditionHistory.findMany({
-        orderBy: { created_at: 'desc' }
-      });
-
+      const history = await ecdService.getEditionHistory();
       return reply.send(history);
     } catch (error) {
       console.error("Erro ao buscar histórico:", error);

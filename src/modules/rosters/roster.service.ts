@@ -7,6 +7,20 @@ dotenv.config();
 
 export class RosterService {
 
+    async findScheduleById(id: string) {
+        return await prisma.schedule.findUnique({
+            where: { id },
+            include: { ministry: true }
+        });
+    }
+
+    async findShiftById(shiftId: string) {
+        return await prisma.shift.findUnique({
+            where: { id: shiftId },
+            include: { schedule: { include: { ministry: true } } }
+        });
+    }
+
     async createRoster(data: CreateRosterBodyType) {
         const ministry = await prisma.ministry.findUnique({
             where: { name: data.ministry }
@@ -20,62 +34,70 @@ export class RosterService {
         });
         const memberMap = new Map(membersList.map(m => [m.name.trim(), m]));
 
-        const schedule = await prisma.schedule.create({
-            data: {
-                month_reference: data.month,
-                ministry_id: ministry.id,
-            }
-        });
-
-        let whatsappBackupText = `📋 *ESCALA CONSOLIDADA - ${data.ministry.toUpperCase()}* 📋\n\n`;
-
-        for (const shift of data.shifts) {
-            const [day, month, year] = shift.date.split('/');
-            const shiftDate = new Date(`${year}-${month}-${day}T12:00:00Z`);
-
-            const createdShift = await prisma.shift.create({
+        return await prisma.$transaction(async (tx) => {
+            const schedule = await tx.schedule.create({
                 data: {
-                    schedule_id: schedule.id,
-                    shift_date: shiftDate,
-                    day_name: shift.dayName
+                    month_reference: data.month,
+                    ministry_id: ministry.id,
                 }
             });
 
-            whatsappBackupText += `📅 *DATA: ${shift.date} (${shift.dayName})*\n`;
+            let whatsappBackupText = `📋 *ESCALA CONSOLIDADA - ${data.ministry.toUpperCase()}* 📋\n\n`;
 
-            // Set para evitar inserir o mesmo membro duas vezes no mesmo culto por segurança
-            const insertedMembersInShift = new Set<string>();
-
-            for (const memberString of shift.team) {
-                const match = memberString.match(/^(.*?) \((.*?)\)$/);
-                const rawName = match ? (match[1] ?? "").trim() : memberString.trim();
-                const areaName = match ? (match[2] ?? "").trim() : null;
-
-                const memberObj = memberMap.get(rawName);
-
-                if (memberObj && !insertedMembersInShift.has(memberObj.id)) {
-                    insertedMembersInShift.add(memberObj.id);
-
-                    await prisma.shiftAssignment.create({
-                        data: {
-                            shift_id: createdShift.id,
-                            member_id: memberObj.id,
-                            area_name: areaName
-                        }
-                    });
-
-                    whatsappBackupText += ` 🔹 ${memberString}\n`;
-                } else if (memberString.includes('FALTA GENTE')) {
-                    whatsappBackupText += ` ⚠️ ${memberString}\n`;
+            for (const shift of data.shifts) {
+                const dateParts = shift.date.split('/');
+                let shiftDate: Date;
+                if (dateParts.length === 3 && dateParts[0] && dateParts[1] && dateParts[2]) {
+                    const [day, month, year] = dateParts;
+                    shiftDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T12:00:00Z`);
+                } else {
+                    shiftDate = new Date(shift.date);
                 }
-            }
-            whatsappBackupText += `\n`;
-        }
 
-        return {
-            schedule,
-            whatsappBackupText: whatsappBackupText.trim()
-        };
+                const createdShift = await tx.shift.create({
+                    data: {
+                        schedule_id: schedule.id,
+                        shift_date: shiftDate,
+                        day_name: shift.dayName
+                    }
+                });
+
+                whatsappBackupText += `📅 *DATA: ${shift.date} (${shift.dayName})*\n`;
+
+                // Set para evitar inserir o mesmo membro duas vezes no mesmo culto por segurança
+                const insertedMembersInShift = new Set<string>();
+
+                for (const memberString of shift.team) {
+                    const match = memberString.match(/^(.*?) \((.*?)\)$/);
+                    const rawName = match ? (match[1] ?? "").trim() : memberString.trim();
+                    const areaName = match ? (match[2] ?? "").trim() : null;
+
+                    const memberObj = memberMap.get(rawName);
+
+                    if (memberObj && !insertedMembersInShift.has(memberObj.id)) {
+                        insertedMembersInShift.add(memberObj.id);
+
+                        await tx.shiftAssignment.create({
+                            data: {
+                                shift_id: createdShift.id,
+                                member_id: memberObj.id,
+                                area_name: areaName
+                            }
+                        });
+
+                        whatsappBackupText += ` 🔹 ${memberString}\n`;
+                    } else if (memberString.includes('FALTA GENTE')) {
+                        whatsappBackupText += ` ⚠️ ${memberString}\n`;
+                    }
+                }
+                whatsappBackupText += `\n`;
+            }
+
+            return {
+                schedule,
+                whatsappBackupText: whatsappBackupText.trim()
+            };
+        });
     }
 
     async getAllRosters(ministryFilter: string) {

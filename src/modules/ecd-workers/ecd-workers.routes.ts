@@ -36,6 +36,16 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Nenhum áudio enviado.' });
       }
 
+      const allowedAudioMimes = [
+        'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg',
+        'audio/webm', 'audio/x-m4a', 'audio/mp4', 'audio/aac'
+      ];
+      if (!allowedAudioMimes.includes(fileData.mimetype)) {
+        return reply.status(400).send({
+          error: `Formato de áudio não permitido: ${fileData.mimetype}. Envie apenas arquivos de áudio (MP3, WAV, OGG, WEBM, M4A).`
+        });
+      }
+
       if (!providedToken) {
         return reply.status(400).send({ error: 'Token de autorização ausente.' });
       }
@@ -94,6 +104,23 @@ export async function ecdWorkersRoutes(app: FastifyInstance) {
 
       if (!fileData) {
         return reply.status(400).send({ error: 'Arquivo ausente.' });
+      }
+
+      const allowedImageMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+      const allowedReceiptMimes = [...allowedImageMimes, 'application/pdf'];
+
+      if (type === 'receipt') {
+        if (!allowedReceiptMimes.includes(fileData.mimetype)) {
+          return reply.status(400).send({
+            error: `Formato de arquivo não permitido para comprovante: ${fileData.mimetype}. Envie imagem (JPG, PNG, WEBP) ou PDF.`
+          });
+        }
+      } else {
+        if (!allowedImageMimes.includes(fileData.mimetype)) {
+          return reply.status(400).send({
+            error: `Formato de arquivo não permitido: ${fileData.mimetype}. Envie apenas imagens JPG, PNG ou WEBP.`
+          });
+        }
       }
 
       // 👇 NOVA TRAVA PÚBLICA (Protege o Perfil E o Comprovante) 👇

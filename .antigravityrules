@@ -1,0 +1,138 @@
+# Regras de Desenvolvimento Antigravity - API IBNH (Backend)
+
+Este arquivo define as diretrizes, padrões de arquitetura, convenções de código e restrições técnicas para o projeto **api-ibnh**, o backend central do ecossistema da Igreja Batista Nova História (IBNH Itamaraju).
+
+---
+
+## 1. Visão Geral e Propósito
+
+- **Função**: API RESTful que centraliza toda a lógica de negócios, autenticação, gestão de membros, escalas ministeriais, financeiro, CMS do site público, galeria de fotos, gestão do ECD (Encontro Com Deus), agendamento e upload de arquivos.
+- **Consumidores**:
+  - `PainelIBNH`: Painel administrativo desktop/mobile para líderes e administradores.
+  - `IBNHItamaraju`: Site institucional e PWA público para membros e visitantes.
+- **Porta Padrão Local**: `3333`
+- **Prefixo Global de Rotas**: `/v1` (todas as rotas registradas em `src/server.ts` ficam sob o prefixo `/v1`, ex: `/v1/auth/login`, `/v1/events/public`).
+
+---
+
+## 2. Stack Tecnológica
+
+- **Runtime**: Node.js 20+ (ESM - `"type": "module"`)
+- **Linguagem**: TypeScript 5.9+ (Modo estrito, `"module": "nodenext"`, `"moduleResolution": "nodenext"`)
+- **Framework Web**: Fastify v5
+- **Banco de Dados**: PostgreSQL com Prisma ORM 5.22 (`previewFeatures = ["multiSchema"]`)
+- **Schemas do Banco**: `auth`, `app`, `roster`
+- **Validação de Dados**: Zod v4
+- **Autenticação**: Stateless JWT via `@fastify/jwt` + bcrypt
+- **Armazenamento de Objetos**: MinIO (compatível com S3) + Sharp para processamento de imagens
+- **Geração de Documentos/Arquivos**: PDFKit, QRCode, CSV-Parser
+- **Segurança**: `@fastify/helmet` (CSP rígido, frameguard deny), `@fastify/rate-limit` (150 req/min por IP), `@fastify/cors`
+- **Bundler & Execução**: `tsx` para desenvolvimento e `tsup` para build de produção (`dist/server.cjs`)
+
+---
+
+## 3. Estrutura de Diretórios e Arquitetura
+
+O projeto segue estritamente o padrão modular por domínio dentro de `src/modules/`:
+
+```
+api-ibnh/
+├── prisma/
+│   ├── schema.prisma          # Definição multi-schema (auth, app, roster)
+│   └── migrations/            # Histórico de migrações
+├── src/
+│   ├── modules/               # Módulos isolados por domínio
+│   │   └── [module-name]/     # Ex: events, members, rosters, finance, cms, ecd...
+│   │       ├── [name].controller.ts  # Tratamento de req/reply, status HTTP
+│   │       ├── [name].routes.ts      # Registro de rotas Fastify e hooks de segurança
+│   │       ├── [name].schemas.ts     # Schemas Zod de validação (body, params, query)
+│   │       └── [name].service.ts     # Regras de negócio e comunicação com Prisma
+│   ├── shared/                # Serviços e utilitários compartilhados
+│   │   ├── database/
+│   │   │   └── prisma.ts      # Instância singleton do PrismaClient
+│   │   ├── storage/
+│   │   │   └── minio.ts       # Cliente MinIO e criação/verificação de buckets
+│   │   └── services/
+│   │       └── audit/         # Serviço de auditoria (AuditService.log)
+│   └── server.ts              # Ponto de entrada, plugins globais e registro de rotas
+├── Dockerfile                 # Multi-stage build para produção
+├── package.json
+└── tsconfig.json
+```
+
+---
+
+## 4. Regras Críticas de Desenvolvimento
+
+### 4.1. Extensão Obrigatória `.js` em Imports (NodeNext)
+- Devido à configuração `"moduleResolution": "nodenext"`, **TODO import relativo em arquivos TypeScript DEVE conter a extensão `.js`**.
+  - ✅ **Correto**: `import { prisma } from '../../shared/database/prisma.js';`
+  - ✅ **Correto**: `import { EventService } from './event.service.js';`
+  - ❌ **Incorreto**: `import { prisma } from '../../shared/database/prisma';`
+
+### 4.2. Padrão de Separação de Camadas
+1. **Routes (`*.routes.ts`)**:
+   - Não devem conter lógica de negócio nem chamadas diretas ao Prisma.
+   - Devem separar explicitamente rotas públicas e rotas autenticadas:
+     - Rotas públicas declaradas diretamente em `app.get('/public', ...)`.
+     - Rotas protegidas agrupadas com `app.register(async function privateRoutes(childApp) { ... })` com hook `onRequest` chamando `await request.jwtVerify()` e checagem de permissão RBAC.
+2. **Controller (`*.controller.ts`)**:
+   - Valida o payload de entrada usando os schemas Zod (`schema.parse(...)`).
+   - Chama o Service correspondente.
+   - Em operações mutativas (CREATE, UPDATE, DELETE), chama obrigatoriamente `AuditService.log(requester.sub, action, entity, entityId, payload)` para auditoria.
+   - Retorna códigos de status HTTP semânticos (200, 201, 400, 401, 403, 404, 500).
+3. **Schemas (`*.schemas.ts`)**:
+   - Definições centralizadas com Zod para entrada (body, query, params) e tipos inferidos via `z.infer<typeof schema>`.
+4. **Service (`*.service.ts`)**:
+   - Lida com todas as transações, buscas, relacionamentos e tratamento de dados com o Prisma.
+   - Não manipula diretamente objetos `request` ou `reply` do Fastify.
+
+### 4.3. Multi-Schema no Prisma
+- O banco PostgreSQL utiliza três schemas lógicos:
+  - `auth`: Usuários, perfis, credenciais, redefinição de senha (`User`, `UserProfile`).
+  - `app`: Membros, ministérios, finanças, eventos, CMS, ECD, negócios da comunidade (`Ministry`, `Member`, `Event`, `FinancialRecord`, etc.).
+  - `roster`: Escalas de serviço, disponibilidade de voluntários, posições (`Schedule`, `ScheduleAssignment`, etc.).
+- Ao criar ou alterar modelos no Prisma, **sempre declarar explicitamente** `@@schema("nome_do_schema")` e `@@map("nome_da_tabela")`.
+- Sempre executar `npx prisma generate` após qualquer alteração no `schema.prisma`.
+
+### 4.4. Controle de Acesso e Permissões (RBAC)
+- Níveis de usuário (`user_level` / `requester.level`):
+  - `0`: **Admin Geral** (acesso total a finanças, usuários, cms, configurações).
+  - `1`: **Sub-Admin / Líder** (gerencia escalas e membros do seu ministério vinculado em `ministry_access`).
+  - `2`: **Usuário Comum / Membro**.
+- Rotas administrativas sensíveis devem validar `requester.level === 0` ou conferir `requester.ministry_access`.
+
+### 4.5. Uploads e Mídia (MinIO)
+- Uploads devem respeitar o limite máximo configurado no `@fastify/multipart` (10MB, max 2 arquivos).
+- Antes de salvar imagens no bucket, processar e otimizar usando `sharp` quando aplicável.
+- Assegurar que o bucket do MinIO esteja inicializado via hook `setupMinioBucket()` antes de atender requisições.
+
+---
+
+## 5. Scripts Principais
+
+```bash
+# Iniciar em modo de desenvolvimento com hot-reload
+npm run dev
+
+# Gerar o build de produção (tsup -> dist/server.cjs)
+npm run build
+
+# Iniciar servidor compilado
+npm start
+
+# Prisma ORM
+npx prisma generate      # Atualizar cliente Prisma
+npx prisma migrate dev   # Criar e rodar migrações em desenvolvimento
+npx prisma studio        # Interface visual do banco de dados
+```
+
+---
+
+## 6. Variáveis de Ambiente Essenciais (`.env`)
+
+- `PORT`: Porta do servidor (padrão `3333`)
+- `NODE_ENV`: `development` ou `production`
+- `DATABASE_URL`: String de conexão PostgreSQL (com ssl e schemas)
+- `JWT_SECRET`: Chave secreta de assinatura JWT (obrigatória em produção)
+- `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET_NAME`, `MINIO_USE_SSL`: Configurações de armazenamento S3

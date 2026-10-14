@@ -37,7 +37,7 @@ export class MemberService {
     }));
   }
 
-  async createMember(data: any) {
+  async createMember(data: MemberBodyType) {
     const ministryId = await this.getMinistryId(data.ministry);
 
     // 1. Monta o objeto apenas com os dados que existem
@@ -72,70 +72,80 @@ export class MemberService {
       email: member.email,
       phone: member.phone,
       role: member.role,
+      teamName: member.team?.name,
       ministry: member.ministry?.name,
       createdAt: member.created_at,
-      s_active: member.is_active,
+      is_active: member.is_active,
       areas: member.areas ? member.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []
     };
   }
 
-  async updateMember(id: string, data: any) {
+  async updateMember(id: string, data: MemberBodyType) {
     const ministryId = await this.getMinistryId(data.ministry);
 
-    // 1. Limpa as áreas antigas do membro (para não duplicar)
-    await prisma.memberArea.deleteMany({
-      where: { member_id: id }
-    });
+    return await prisma.$transaction(async (tx) => {
+      // 1. Limpa as áreas antigas do membro (para não duplicar)
+      await tx.memberArea.deleteMany({
+        where: { member_id: id }
+      });
 
-    // 2. Prepara os novos dados
-    const payload: any = {
-      name: data.name,
-      phone: data.phone ?? null,
-      email: data.email ?? null,
-      role: data.role ?? null,
-      team_id: data.team ?? null,
-      ministry_id: ministryId,
-      is_active: data.is_active ?? true
-    };
-
-    // 3. Adiciona as novas áreas, se houver
-    if (data.areas && data.areas.length > 0) {
-      payload.areas = {
-        create: data.areas.map((areaId: string) => ({
-          area_id: areaId
-        }))
+      // 2. Prepara os novos dados
+      const payload: any = {
+        name: data.name,
+        phone: data.phone ?? null,
+        email: data.email ?? null,
+        role: data.role ?? null,
+        team_id: data.team ?? null,
+        ministry_id: ministryId,
+        is_active: data.is_active ?? true
       };
-    }
 
-    // 4. Executa a atualização
-    const member: any = await prisma.member.update({
-      where: { id },
-      data: payload,
-      include: { ministry: true, team: true, areas: { include: { area: true } } }
+      // 3. Adiciona as novas áreas, se houver
+      if (data.areas && data.areas.length > 0) {
+        payload.areas = {
+          create: data.areas.map((areaId: string) => ({
+            area_id: areaId
+          }))
+        };
+      }
+
+      // 4. Executa a atualização
+      const member: any = await tx.member.update({
+        where: { id },
+        data: payload,
+        include: { ministry: true, team: true, areas: { include: { area: true } } }
+      });
+
+      return {
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        phone: member.phone,
+        role: member.role,
+        teamName: member.team?.name,
+        ministry: member.ministry?.name,
+        createdAt: member.created_at,
+        is_active: member.is_active,
+        areas: member.areas ? member.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []
+      };
     });
-
-    return {
-      id: member.id,
-      name: member.name,
-      email: member.email,
-      phone: member.phone,
-      role: member.role,
-      ministry: member.ministry?.name,
-      createdAt: member.created_at,
-      s_active: member.is_active,
-      areas: member.areas ? member.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []
-    };
   }
 
   async deleteMember(id: string) {
-    await prisma.shiftAssignment.deleteMany({
-      where: { member_id: id }
-    });
+    return await prisma.$transaction(async (tx) => {
+      await tx.shiftAssignment.deleteMany({
+        where: { member_id: id }
+      });
 
-    await prisma.member.delete({
-      where: { id }
-    });
+      await tx.memberArea.deleteMany({
+        where: { member_id: id }
+      });
 
-    return { success: true };
+      await tx.member.delete({
+        where: { id }
+      });
+
+      return { success: true };
+    });
   }
 }

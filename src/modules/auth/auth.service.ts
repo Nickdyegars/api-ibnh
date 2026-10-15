@@ -10,8 +10,17 @@ export class AuthService {
     }
 
     let level = 2;
-    if (data.role === 'admin') level = 0;
-    if (data.role === 'leader') level = 1;
+    let ministry = data.ministry;
+    if (data.role === 'admin') {
+      level = 0;
+    } else if (data.role === 'leader') {
+      level = 1;
+    } else if (data.role === 'storymaker') {
+      level = 2;
+      if (!ministry || ministry === 'all') {
+        ministry = 'Multimídia';
+      }
+    }
 
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(data.password, salt);
@@ -21,7 +30,7 @@ export class AuthService {
         email: data.email,
         password_hash,
         user_level: level,
-        ministry_access: data.ministry,
+        ministry_access: ministry,
         profile: {
           create: { full_name: data.name }
         }
@@ -33,7 +42,10 @@ export class AuthService {
   }
 
   async login(data: { email: string; password: string }) {
-    const user = await prisma.user.findUnique({ where: { email: data.email } });
+    const user = await prisma.user.findUnique({
+      where: { email: data.email },
+      include: { profile: true }
+    });
     if (!user) throw new Error('Credenciais inválidas.');
 
     const isPasswordValid = await bcrypt.compare(data.password, user.password_hash);
@@ -53,20 +65,26 @@ export class AuthService {
     });
 
     // Formatamos para o frontend entender facilmente
-    return users.map(u => ({
-      id: u.id,
-      email: u.email,
-      name: u.profile?.full_name || 'Sem nome',
-      level: u.user_level,
-      role: u.user_level === 0 ? 'admin' : 'leader',
-      ministry: u.ministry_access
-    }));
+    return users.map(u => {
+      let role = 'leader';
+      if (u.user_level === 0) role = 'admin';
+      else if (u.user_level === 2) role = 'storymaker';
+
+      return {
+        id: u.id,
+        email: u.email,
+        name: u.profile?.full_name || 'Sem nome',
+        level: u.user_level,
+        role,
+        ministry: u.ministry_access
+      };
+    });
   }
 
   // ==========================================
   // ATUALIZAR USUÁRIO (PUT)
   // ==========================================
-  async updateUser(id: string, data: { name?: string | undefined; email?: string | undefined; password?: string | undefined; role?: 'admin' | 'leader' | undefined; ministry?: string | undefined }) {
+  async updateUser(id: string, data: { name?: string | undefined; email?: string | undefined; password?: string | undefined; role?: 'admin' | 'leader' | 'storymaker' | undefined; ministry?: string | undefined }) {
     const userExists = await prisma.user.findUnique({ where: { id } });
     if (!userExists) throw new Error('Usuário não encontrado.');
 
@@ -74,7 +92,16 @@ export class AuthService {
     const updateData: any = {};
 
     if (data.role) {
-      updateData.user_level = data.role === 'admin' ? 0 : 1;
+      if (data.role === 'admin') {
+        updateData.user_level = 0;
+      } else if (data.role === 'leader') {
+        updateData.user_level = 1;
+      } else if (data.role === 'storymaker') {
+        updateData.user_level = 2;
+        if (!data.ministry || data.ministry === 'all') {
+          updateData.ministry_access = 'Multimídia';
+        }
+      }
     }
     if (data.ministry !== undefined) {
       updateData.ministry_access = data.ministry;

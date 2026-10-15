@@ -70,6 +70,7 @@ export class AuthController {
         token,
         user: {
           id: user.id,
+          name: (user as any).profile?.full_name || user.email.split('@')[0],
           email: user.email,
           level: user.user_level,
           ministry_access: user.ministry_access,

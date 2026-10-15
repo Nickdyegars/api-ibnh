@@ -21,9 +21,12 @@ export async function galleryRoutes(app: FastifyInstance) {
         await request.jwtVerify();
         const requester = request.user as any;
         
-        // Bloqueia se não for Admin (0) ou Mídia (acesso específico)
-        if (requester.level !== 0 && requester.ministry_access !== 'Mídia') {
-           return reply.status(403).send({ error: 'Acesso negado. Apenas a equipe de Mídia pode gerenciar a galeria.' });
+        // Bloqueia se não for Admin (0) ou Multimídia/Mídia (acesso específico)
+        const ministry = (requester.ministry_access || '').toLowerCase();
+        const isMedia = ministry === 'multimídia' || ministry === 'multimidia' || ministry === 'mídia' || ministry === 'midia';
+
+        if (requester.level !== 0 && !isMedia) {
+           return reply.status(403).send({ error: 'Acesso negado. Apenas a equipe de Multimídia pode gerenciar a galeria.' });
         }
       } catch (err) {
         return reply.status(401).send({ error: 'Sessão inválida. Faça login.' });

@@ -23,6 +23,7 @@ import { areaRoutes } from './modules/area/area.routes.js';
 import { galleryRoutes } from './modules/gallery/gallery.routes.js';
 import { GalleryService } from './modules/gallery/gallery.service.js';
 import { uploadRoutes } from './modules/upload/upload.routes.js';
+import { ministryRoutes } from './modules/ministries/ministry.routes.js';
 import fastifyRateLimit from '@fastify/rate-limit';
 
 const app = Fastify({ logger: true });
@@ -143,6 +144,7 @@ app.register(async function apiV1(v1) {
   v1.register(areaRoutes, { prefix: '/areas' });
   v1.register(galleryRoutes, { prefix: '/gallery' });
   v1.register(uploadRoutes, { prefix: '/upload' });
+  v1.register(ministryRoutes, { prefix: '/ministries' });
 
 }, { prefix: '/v1' }); // 👈 O prefixo global entra aqui!
 

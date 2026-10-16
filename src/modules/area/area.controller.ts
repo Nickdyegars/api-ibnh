@@ -23,7 +23,13 @@ export class AreaController {
       const requester = request.user as any;
       const data = areaBodySchema.parse(request.body);
 
-      // 👇 TRAVA DE SEGURANÇA INTER-MINISTÉRIO 👇
+      // 👇 TRAVA DE SEGURANÇA: Apenas Admin (0) ou Líder (1) podem criar áreas 👇
+      if (requester.level > 1) {
+        return reply.status(403).send({ 
+          error: 'Acesso negado. Apenas líderes ou administradores podem adicionar áreas.' 
+        });
+      }
+
       if (requester.level !== 0 && requester.ministry_access !== 'all') {
         if (data.ministry !== requester.ministry_access) {
           return reply.status(403).send({ 
@@ -48,9 +54,11 @@ export class AreaController {
       const requester = request.user as any;
       const { id } = request.params as { id: string };
 
-      // 👇 TRAVA DE EXCLUSÃO 👇
-      if (requester.level !== 0) {
-         return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem excluir áreas do banco de dados.' });
+      // 👇 TRAVA DE EXCLUSÃO: Apenas Admin (0) ou Líder (1) podem excluir áreas 👇
+      if (requester.level > 1) {
+         return reply.status(403).send({ 
+           error: 'Acesso negado. Apenas líderes ou administradores podem excluir áreas.' 
+         });
       }
 
       await areaService.deleteArea(id);

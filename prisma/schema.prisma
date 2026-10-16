@@ -39,6 +39,7 @@ model User {
 model Ministry {
   id          Int       @id @default(autoincrement())
   name        String    @unique @db.VarChar(100)
+  color       String?   @default("#3b82f6") @db.VarChar(20)
   
   // Relacionamentos que você já tem:
   members     Member[]

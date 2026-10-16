@@ -13,8 +13,11 @@ export class AuthService {
     let ministry = data.ministry;
     if (data.role === 'admin') {
       level = 0;
+      ministry = 'all';
     } else if (data.role === 'leader') {
       level = 1;
+    } else if (data.role === 'member' || data.role === 'operator') {
+      level = 2;
     } else if (data.role === 'storymaker') {
       level = 2;
       if (!ministry || ministry === 'all') {
@@ -66,9 +69,9 @@ export class AuthService {
 
     // Formatamos para o frontend entender facilmente
     return users.map(u => {
-      let role = 'leader';
+      let role = 'member';
       if (u.user_level === 0) role = 'admin';
-      else if (u.user_level === 2) role = 'storymaker';
+      else if (u.user_level === 1) role = 'leader';
 
       return {
         id: u.id,
@@ -84,7 +87,7 @@ export class AuthService {
   // ==========================================
   // ATUALIZAR USUÁRIO (PUT)
   // ==========================================
-  async updateUser(id: string, data: { name?: string | undefined; email?: string | undefined; password?: string | undefined; role?: 'admin' | 'leader' | 'storymaker' | undefined; ministry?: string | undefined }) {
+  async updateUser(id: string, data: { name?: string | undefined; email?: string | undefined; password?: string | undefined; role?: 'admin' | 'leader' | 'storymaker' | 'member' | 'operator' | undefined; ministry?: string | undefined }) {
     const userExists = await prisma.user.findUnique({ where: { id } });
     if (!userExists) throw new Error('Usuário não encontrado.');
 
@@ -94,8 +97,11 @@ export class AuthService {
     if (data.role) {
       if (data.role === 'admin') {
         updateData.user_level = 0;
+        updateData.ministry_access = 'all';
       } else if (data.role === 'leader') {
         updateData.user_level = 1;
+      } else if (data.role === 'member' || data.role === 'operator') {
+        updateData.user_level = 2;
       } else if (data.role === 'storymaker') {
         updateData.user_level = 2;
         if (!data.ministry || data.ministry === 'all') {

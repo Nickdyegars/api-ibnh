@@ -24,9 +24,11 @@ import { galleryRoutes } from './modules/gallery/gallery.routes.js';
 import { GalleryService } from './modules/gallery/gallery.service.js';
 import { uploadRoutes } from './modules/upload/upload.routes.js';
 import { ministryRoutes } from './modules/ministries/ministry.routes.js';
+import { auditRoutes } from './shared/services/audit/audit.routes.js';
 import fastifyRateLimit from '@fastify/rate-limit';
 
 const app = Fastify({ logger: true });
+
 
 app.register(fastifyRateLimit, {
   max: 150, // Permite no máximo 150 requisições...
@@ -145,8 +147,10 @@ app.register(async function apiV1(v1) {
   v1.register(galleryRoutes, { prefix: '/gallery' });
   v1.register(uploadRoutes, { prefix: '/upload' });
   v1.register(ministryRoutes, { prefix: '/ministries' });
+  v1.register(auditRoutes, { prefix: '/audit' });
 
 }, { prefix: '/v1' }); // 👈 O prefixo global entra aqui!
+
 
 app.setErrorHandler((error: any, request, reply) => {
   // Trata erros de validação do Zod

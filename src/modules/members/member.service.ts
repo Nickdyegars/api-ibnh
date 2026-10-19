@@ -4,20 +4,43 @@ import { MemberBodyType } from './member.schemas.js';
 
 export class MemberService {
 
-  private async getMinistryId(ministryName: string) {
-    const ministry = await prisma.ministry.upsert({
-      where: { name: ministryName },
-      update: {},
-      create: { name: ministryName }
+  private async getMinistryId(ministryName: string, congregationId?: string | null) {
+    let targetCongregationId = congregationId;
+    if (!targetCongregationId) {
+      const sede = await prisma.congregation.findFirst({ where: { is_main: true } });
+      if (sede) targetCongregationId = sede.id;
+    }
+
+    const ministry = await prisma.ministry.findFirst({
+      where: {
+        name: { equals: ministryName, mode: 'insensitive' },
+        congregation_id: targetCongregationId || undefined
+      }
     });
-    return ministry.id;
+
+    if (ministry) return ministry.id;
+
+    const newMinistry = await prisma.ministry.create({
+      data: {
+        name: ministryName,
+        congregation_id: targetCongregationId || null
+      }
+    });
+    return newMinistry.id;
   }
 
-  async getAllMembers() {
+  async getAllMembers(congregationId?: string) {
+    const where: any = {};
+    if (congregationId) {
+      where.congregation_id = congregationId;
+    }
+
     const members: any[] = await prisma.member.findMany({
+      where,
       include: {
         ministry: true,
         team: true,
+        congregation: { select: { id: true, name: true, is_main: true } },
         areas: { include: { area: true } }
       },
       orderBy: { name: 'asc' }
@@ -31,6 +54,8 @@ export class MemberService {
       role: m.role,
       teamName: m.team?.name,
       ministry: m.ministry?.name || 'Geral',
+      congregation_id: m.congregation_id,
+      congregation: m.congregation,
       createdAt: m.created_at,
       is_active: m.is_active,
       areas: m.areas ? m.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []
@@ -38,7 +63,13 @@ export class MemberService {
   }
 
   async createMember(data: MemberBodyType) {
-    const ministryId = await this.getMinistryId(data.ministry);
+    let targetCongregationId = data.congregation_id;
+    if (!targetCongregationId) {
+      const sede = await prisma.congregation.findFirst({ where: { is_main: true } });
+      if (sede) targetCongregationId = sede.id;
+    }
+
+    const ministryId = await this.getMinistryId(data.ministry, targetCongregationId);
 
     // 1. Monta o objeto apenas com os dados que existem
     const payload: any = {
@@ -47,6 +78,7 @@ export class MemberService {
       phone: data.phone ?? null,
       role: data.role ?? null,
       team_id: data.team ?? null,
+      congregation_id: targetCongregationId || null,
       ministry_id: ministryId,
       is_active: data.is_active ?? true
     };
@@ -63,7 +95,12 @@ export class MemberService {
     // 3. Tipamos como ': any' para o TypeScript aceitar os includes sem erro de cache
     const member: any = await prisma.member.create({
       data: payload,
-      include: { ministry: true, team: true, areas: { include: { area: true } } }
+      include: {
+        ministry: true,
+        team: true,
+        congregation: { select: { id: true, name: true, is_main: true } },
+        areas: { include: { area: true } }
+      }
     });
 
     return {
@@ -74,6 +111,8 @@ export class MemberService {
       role: member.role,
       teamName: member.team?.name,
       ministry: member.ministry?.name,
+      congregation_id: member.congregation_id,
+      congregation: member.congregation,
       createdAt: member.created_at,
       is_active: member.is_active,
       areas: member.areas ? member.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []
@@ -81,9 +120,12 @@ export class MemberService {
   }
 
   async updateMember(id: string, data: MemberBodyType) {
-    const ministryId = await this.getMinistryId(data.ministry);
-
     return await prisma.$transaction(async (tx) => {
+      const current = await tx.member.findUnique({ where: { id } });
+      const targetCongregationId = data.congregation_id !== undefined ? data.congregation_id : current?.congregation_id;
+
+      const ministryId = await this.getMinistryId(data.ministry, targetCongregationId);
+
       // 1. Limpa as áreas antigas do membro (para não duplicar)
       await tx.memberArea.deleteMany({
         where: { member_id: id }
@@ -100,6 +142,10 @@ export class MemberService {
         is_active: data.is_active ?? true
       };
 
+      if (data.congregation_id !== undefined) {
+        payload.congregation_id = data.congregation_id || null;
+      }
+
       // 3. Adiciona as novas áreas, se houver
       if (data.areas && data.areas.length > 0) {
         payload.areas = {
@@ -113,7 +159,12 @@ export class MemberService {
       const member: any = await tx.member.update({
         where: { id },
         data: payload,
-        include: { ministry: true, team: true, areas: { include: { area: true } } }
+        include: {
+          ministry: true,
+          team: true,
+          congregation: { select: { id: true, name: true, is_main: true } },
+          areas: { include: { area: true } }
+        }
       });
 
       return {
@@ -124,6 +175,8 @@ export class MemberService {
         role: member.role,
         teamName: member.team?.name,
         ministry: member.ministry?.name,
+        congregation_id: member.congregation_id,
+        congregation: member.congregation,
         createdAt: member.created_at,
         is_active: member.is_active,
         areas: member.areas ? member.areas.map((ma: any) => ({ id: ma.area.id, name: ma.area.name })) : []

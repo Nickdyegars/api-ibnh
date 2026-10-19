@@ -10,7 +10,8 @@ export class MemberController {
 
   async list(request: FastifyRequest, reply: FastifyReply) {
     try {
-      const members = await memberService.getAllMembers();
+      const { congregationId } = request.query as { congregationId?: string };
+      const members = await memberService.getAllMembers(congregationId);
       return reply.send(members);
     } catch (error: any) {
       return reply.status(500).send({ error: 'Erro ao buscar membros' });

@@ -4,8 +4,8 @@ export class MinistryAreaService {
   async getAreas(ministryName: string) {
     if (!ministryName || ministryName === 'all') return [];
     
-    const ministry = await prisma.ministry.findUnique({ 
-        where: { name: ministryName } 
+    const ministry = await prisma.ministry.findFirst({ 
+        where: { name: { equals: ministryName, mode: 'insensitive' } } 
     });
     
     if (!ministry) return [];
@@ -17,11 +17,15 @@ export class MinistryAreaService {
   }
 
   async createArea(name: string, ministryName: string) {
-    const ministry = await prisma.ministry.upsert({
-      where: { name: ministryName },
-      update: {},
-      create: { name: ministryName }
+    let ministry = await prisma.ministry.findFirst({
+      where: { name: { equals: ministryName, mode: 'insensitive' } }
     });
+
+    if (!ministry) {
+      ministry = await prisma.ministry.create({
+        data: { name: ministryName }
+      });
+    }
 
     return await prisma.ministryArea.create({
       data: { 

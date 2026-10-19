@@ -8,7 +8,8 @@ const ministryService = new MinistryService();
 export class MinistryController {
   async list(request: FastifyRequest, reply: FastifyReply) {
     try {
-      const ministries = await ministryService.list();
+      const { congregationId } = request.query as { congregationId?: string };
+      const ministries = await ministryService.list(congregationId);
       return reply.send(ministries);
     } catch (error: any) {
       return reply.status(500).send({ error: error.message || 'Erro ao listar equipes/ministérios.' });
@@ -18,17 +19,17 @@ export class MinistryController {
   async create(request: FastifyRequest, reply: FastifyReply) {
     try {
       const user = request.user as any;
-      if (user.level !== 0) {
+      if (user.level !== 0 && user.user_level !== 0) {
         return reply.status(403).send({ error: 'Acesso negado. Apenas Administradores podem criar equipes.' });
       }
 
       const rawBody = request.body as any;
       const bodyData = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
-      const { name, color } = createMinistrySchema.parse(bodyData);
+      const { name, color, congregation_id } = createMinistrySchema.parse(bodyData);
 
-      const newMinistry = await ministryService.create(name, color);
+      const newMinistry = await ministryService.create(name, color, congregation_id || undefined);
 
-      AuditService.log(user.sub, 'CREATE', 'MINISTRY', String(newMinistry.id), { name, color });
+      AuditService.log(user.sub || user.id, 'CREATE', 'MINISTRY', String(newMinistry.id), { name, color, congregation_id });
 
       return reply.status(201).send(newMinistry);
     } catch (error: any) {
@@ -39,18 +40,18 @@ export class MinistryController {
   async update(request: FastifyRequest, reply: FastifyReply) {
     try {
       const user = request.user as any;
-      if (user.level !== 0) {
+      if (user.level !== 0 && user.user_level !== 0) {
         return reply.status(403).send({ error: 'Acesso negado. Apenas Administradores podem editar equipes.' });
       }
 
       const { id } = request.params as { id: string };
       const rawBody = request.body as any;
       const bodyData = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
-      const { name, color } = updateMinistrySchema.parse(bodyData);
+      const { name, color, congregation_id } = updateMinistrySchema.parse(bodyData);
 
-      const updated = await ministryService.update(Number(id), name, color);
+      const updated = await ministryService.update(Number(id), name, color, congregation_id || undefined);
 
-      AuditService.log(user.sub, 'UPDATE', 'MINISTRY', String(id), { name, color });
+      AuditService.log(user.sub || user.id, 'UPDATE', 'MINISTRY', String(id), { name, color, congregation_id });
 
       return reply.send(updated);
     } catch (error: any) {

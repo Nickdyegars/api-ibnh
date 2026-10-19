@@ -25,6 +25,8 @@ import { GalleryService } from './modules/gallery/gallery.service.js';
 import { uploadRoutes } from './modules/upload/upload.routes.js';
 import { ministryRoutes } from './modules/ministries/ministry.routes.js';
 import { auditRoutes } from './shared/services/audit/audit.routes.js';
+import { congregationRoutes } from './modules/congregations/congregation.routes.js';
+import { CongregationService } from './modules/congregations/congregation.service.js';
 import fastifyRateLimit from '@fastify/rate-limit';
 
 const app = Fastify({ logger: true });
@@ -105,6 +107,14 @@ app.register(multipart, {
 app.addHook('onReady', async () => {
   await setupMinioBucket();
 
+  // Rotina de inicialização da congregação Sede e dados legados
+  try {
+    const congregationService = new CongregationService();
+    await congregationService.ensureSedeExists();
+  } catch (err) {
+    app.log.error(err, 'Erro ao inicializar congregação Sede');
+  }
+
   // Rotina de limpeza automática de fotos/álbuns expirados (7 dias)
   try {
     const galleryService = new GalleryService();
@@ -148,6 +158,7 @@ app.register(async function apiV1(v1) {
   v1.register(uploadRoutes, { prefix: '/upload' });
   v1.register(ministryRoutes, { prefix: '/ministries' });
   v1.register(auditRoutes, { prefix: '/audit' });
+  v1.register(congregationRoutes, { prefix: '/congregations' });
 
 }, { prefix: '/v1' }); // 👈 O prefixo global entra aqui!
 

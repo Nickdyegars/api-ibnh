@@ -62,8 +62,8 @@ export class RosterController {
 
     async list(request: FastifyRequest, reply: FastifyReply) {
         try {
-            const { ministry } = getRostersQuerySchema.parse(request.query);
-            const rosters = await rosterService.getAllRosters(ministry);
+            const { ministry, congregationId } = getRostersQuerySchema.parse(request.query);
+            const rosters = await rosterService.getAllRosters(ministry, congregationId);
             return reply.send(rosters);
         } catch (error: any) {
             return reply.status(400).send({ error: error.message });

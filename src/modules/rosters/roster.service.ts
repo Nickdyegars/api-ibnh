@@ -22,15 +22,27 @@ export class RosterService {
     }
 
     async createRoster(data: CreateRosterBodyType) {
-        const ministry = await prisma.ministry.findUnique({
-            where: { name: data.ministry }
+        let targetCongregationId = data.congregationId;
+        if (!targetCongregationId) {
+            const sede = await prisma.congregation.findFirst({ where: { is_main: true } });
+            if (sede) targetCongregationId = sede.id;
+        }
+
+        const ministry = await prisma.ministry.findFirst({
+            where: {
+                name: { equals: data.ministry, mode: 'insensitive' },
+                congregation_id: targetCongregationId || undefined
+            }
         });
 
-        if (!ministry) throw new Error(`Ministério '${data.ministry}' não encontrado no banco.`);
+        if (!ministry) throw new Error(`Ministério '${data.ministry}' não encontrado para esta congregação.`);
 
-        // Busca todos os membros do ministério para termos um mapa rápido por nome
+        // Busca todos os membros do ministério nesta congregação para termos um mapa rápido por nome
         const membersList = await prisma.member.findMany({
-            where: { ministry_id: ministry.id }
+            where: {
+                ministry_id: ministry.id,
+                congregation_id: targetCongregationId || undefined
+            }
         });
         const memberMap = new Map(membersList.map(m => [m.name.trim(), m]));
 
@@ -39,6 +51,8 @@ export class RosterService {
                 data: {
                     month_reference: data.month,
                     ministry_id: ministry.id,
+                    congregation_id: targetCongregationId || null,
+                    author_id: data.authorId || null
                 }
             });
 
@@ -100,20 +114,26 @@ export class RosterService {
         });
     }
 
-    async getAllRosters(ministryFilter: string) {
-        // 1. Busca as escalas no Prisma com todas as relações e áreas dos turnos
+    async getAllRosters(ministryFilter: string, congregationId?: string) {
+        const where: any = {};
+        if (ministryFilter !== 'all') {
+            where.ministry = { name: ministryFilter };
+        }
+        if (congregationId) {
+            where.congregation_id = congregationId;
+        }
+
         const schedules = await prisma.schedule.findMany({
-            where: ministryFilter !== 'all'
-                ? { ministry: { name: ministryFilter } }
-                : {},
+            where,
             include: {
                 ministry: true,
+                congregation: { select: { id: true, name: true, is_main: true } },
                 author: { include: { profile: true } },
                 shifts: {
                     orderBy: { shift_date: 'asc' },
                     include: {
                         members: {
-                            include: { member: true } // Puxa o membro e a area_name salva na tabela shift_assignments
+                            include: { member: true }
                         }
                     }
                 }
@@ -121,10 +141,12 @@ export class RosterService {
             orderBy: { created_at: 'desc' }
         });
 
-        // 2. Mapeia e reconstrói o array 'team' garantindo que a área vá junto ("Nome (Área)")
+        // Mapeia e reconstrói o array 'team' garantindo que a área vá junto ("Nome (Área)")
         return schedules.map(schedule => ({
             id: schedule.id,
             ministry: schedule.ministry?.name || 'Geral',
+            congregation_id: schedule.congregation_id,
+            congregation: schedule.congregation,
             month: schedule.month_reference,
             createdBy: schedule.author?.profile?.full_name || schedule.author?.email || 'Sistema',
             createdAt: schedule.created_at,
@@ -133,7 +155,6 @@ export class RosterService {
                 date: new Date(shift.shift_date).toLocaleDateString('pt-BR', { timeZone: 'UTC' }),
                 dayName: shift.day_name || '',
                 team: shift.members.map(assignment => {
-                    // Se houver uma área salva, retorna "Nome (Área)", senão apenas o nome
                     if (assignment.area_name) {
                         return `${assignment.member.name} (${assignment.area_name})`;
                     }
@@ -151,20 +172,73 @@ export class RosterService {
     }
 
     async generateRosterPreview(data: any) {
-        const { month, ministry: ministryName, teamSize, restrictions, louvorMode } = data;
+        const { month, ministry: ministryName, teamSize, restrictions, louvorMode, congregationId, customCultDays } = data;
 
-        const ministry = await prisma.ministry.findUnique({ where: { name: ministryName } });
-        if (!ministry) throw new Error("Ministério não encontrado");
+        let targetCongregationId = congregationId;
+        let cultDaysList: string[] = [];
 
-        const members = await prisma.member.findMany({
+        if (targetCongregationId) {
+            const cong = await prisma.congregation.findUnique({ where: { id: targetCongregationId } });
+            if (cong && cong.cult_days && cong.cult_days.length > 0) {
+                cultDaysList = cong.cult_days;
+            }
+        } else {
+            const sede = await prisma.congregation.findFirst({ where: { is_main: true } });
+            if (sede) {
+                targetCongregationId = sede.id;
+                cultDaysList = sede.cult_days;
+            }
+        }
+
+        if (Array.isArray(customCultDays) && customCultDays.length > 0) {
+            cultDaysList = customCultDays;
+        }
+
+        if (cultDaysList.length === 0) {
+            cultDaysList = ['DOMINGO', 'QUINTA'];
+        }
+
+        const dayMap: Record<string, number> = {
+            'DOMINGO': 0,
+            'SEGUNDA': 1,
+            'TERCA': 2,
+            'QUARTA': 3,
+            'QUINTA': 4,
+            'SEXTA': 5,
+            'SABADO': 6
+        };
+
+        const dayNamesPt: Record<number, string> = {
+            0: 'Domingo',
+            1: 'Segunda-feira',
+            2: 'Terça-feira',
+            3: 'Quarta-feira',
+            4: 'Quinta-feira',
+            5: 'Sexta-feira',
+            6: 'Sábado'
+        };
+
+        const allowedDaysOfWeek = cultDaysList.map(d => dayMap[d.toUpperCase()]).filter(d => d !== undefined);
+
+        const ministry = await prisma.ministry.findFirst({
+            where: {
+                name: { equals: ministryName, mode: 'insensitive' },
+                congregation_id: targetCongregationId || undefined
+            }
+        });
+
+        if (!ministry) throw new Error("Ministério não encontrado para esta congregação");
+
+        const members: any[] = await prisma.member.findMany({
             where: {
                 ministry_id: ministry.id,
+                congregation_id: targetCongregationId || undefined,
                 is_active: true
             },
             select: { name: true, role: true, team: true, areas: { include: { area: true } } }
         });
 
-        if (members.length === 0) throw new Error("Nenhum membro ativo cadastrado neste ministério");
+        if (members.length === 0) throw new Error("Nenhum membro ativo cadastrado neste ministério para esta congregação");
 
         const [year, monthNum] = month.split('-').map(Number);
         const date = new Date(year, monthNum - 1, 1);
@@ -172,7 +246,7 @@ export class RosterService {
 
         while (date.getMonth() === monthNum - 1) {
             const dayOfWeek = date.getDay();
-            if (dayOfWeek === 0 || dayOfWeek === 4) {
+            if (allowedDaysOfWeek.includes(dayOfWeek)) {
                 const rawDate = date.toISOString().split('T')[0];
                 const actualDate = new Date(rawDate + 'T12:00:00');
 
@@ -183,7 +257,7 @@ export class RosterService {
                 services.push({
                     date: actualDate.toLocaleDateString('pt-BR'),
                     rawDate,
-                    dayName: dayOfWeek === 0 ? 'Domingo' : 'Quinta-feira',
+                    dayName: dayNamesPt[dayOfWeek] || 'Culto',
                     weekKey
                 });
             }
@@ -242,7 +316,7 @@ export class RosterService {
 
             while (date.getMonth() === monthNum - 1) {
                 const dayOfWeek = date.getDay();
-                if (dayOfWeek === 0 || dayOfWeek === 4) {
+                if (allowedDaysOfWeek.includes(dayOfWeek)) {
                     const rawDate = date.toISOString().split('T')[0]!;
                     const actualDate = new Date(rawDate + 'T12:00:00');
 
@@ -255,7 +329,7 @@ export class RosterService {
                     safeServices.push({
                         date: actualDate.toLocaleDateString('pt-BR'),
                         rawDate,
-                        dayName: dayOfWeek === 0 ? 'Domingo' : 'Quinta-feira',
+                        dayName: dayNamesPt[dayOfWeek] || 'Culto',
                         weekKey
                     });
                 }
@@ -424,7 +498,7 @@ export class RosterService {
 
             while (date.getMonth() === monthNum - 1) {
                 const dayOfWeek = date.getDay();
-                if (dayOfWeek === 0 || dayOfWeek === 4) {
+                if (allowedDaysOfWeek.includes(dayOfWeek)) {
                     // Adicionando '!' para garantir ao TS que a string existe
                     const rawDate = date.toISOString().split('T')[0]!;
                     const actualDate = new Date(rawDate + 'T12:00:00');
@@ -437,7 +511,7 @@ export class RosterService {
                     services.push({
                         date: actualDate.toLocaleDateString('pt-BR'),
                         rawDate,
-                        dayName: dayOfWeek === 0 ? 'Domingo' : 'Quinta-feira',
+                        dayName: dayNamesPt[dayOfWeek] || 'Culto',
                         weekKey
                     });
                 }

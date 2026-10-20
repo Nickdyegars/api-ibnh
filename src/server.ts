@@ -26,6 +26,7 @@ import { uploadRoutes } from './modules/upload/upload.routes.js';
 import { ministryRoutes } from './modules/ministries/ministry.routes.js';
 import { auditRoutes } from './shared/services/audit/audit.routes.js';
 import { congregationRoutes } from './modules/congregations/congregation.routes.js';
+import { permissionsRoutes } from './modules/permissions/permissions.routes.js';
 import { CongregationService } from './modules/congregations/congregation.service.js';
 import fastifyRateLimit from '@fastify/rate-limit';
 
@@ -159,6 +160,7 @@ app.register(async function apiV1(v1) {
   v1.register(ministryRoutes, { prefix: '/ministries' });
   v1.register(auditRoutes, { prefix: '/audit' });
   v1.register(congregationRoutes, { prefix: '/congregations' });
+  v1.register(permissionsRoutes, { prefix: '/permissions' });
 
 }, { prefix: '/v1' }); // 👈 O prefixo global entra aqui!
 

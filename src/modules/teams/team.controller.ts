@@ -10,8 +10,8 @@ const teamService = new TeamService();
 export class TeamController {
     async list(request: FastifyRequest, reply: FastifyReply) {
         try {
-            const { ministry } = getTeamsQuerySchema.parse(request.query);
-            const teams = await teamService.getTeams(ministry);
+            const { ministry, congregationId } = getTeamsQuerySchema.parse(request.query);
+            const teams = await teamService.getTeams(ministry, congregationId);
             return reply.send(teams);
         } catch (error: any) {
             return reply.status(400).send({ error: error.message || 'Erro ao buscar equipes' });
@@ -26,7 +26,7 @@ export class TeamController {
             const rawBody = request.body as any;
             const bodyData = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
 
-            const { name, ministry } = teamBodySchema.parse(bodyData);
+            const { name, ministry, congregation_id } = teamBodySchema.parse(bodyData);
 
             // === TRAVA DE SEGURANÇA ===
             if (user.level > 0) {
@@ -40,10 +40,10 @@ export class TeamController {
             }
             // ==========================
 
-            const newTeam = await teamService.createTeam(name, ministry) as any;
+            const newTeam = await teamService.createTeam(name, ministry, congregation_id) as any;
 
             // 📝 LOG: Nova banda/equipe integrada a um ministério
-            AuditService.log(user.sub, 'CREATE', 'TEAM', newTeam?.id, { name, ministry });
+            AuditService.log(user.sub, 'CREATE', 'TEAM', newTeam?.id, { name, ministry, congregation_id });
 
             return reply.status(201).send(newTeam);
         } catch (error: any) {

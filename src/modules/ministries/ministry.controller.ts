@@ -8,7 +8,15 @@ const ministryService = new MinistryService();
 export class MinistryController {
   async list(request: FastifyRequest, reply: FastifyReply) {
     try {
-      const { congregationId } = request.query as { congregationId?: string };
+      const requester = request.user as any;
+      const requesterLevel = Number(requester?.level ?? requester?.user_level ?? 3);
+      let { congregationId } = request.query as { congregationId?: string };
+
+      // Se não for Super Admin (0), restringe estritamente à congregação do usuário logado
+      if (requesterLevel !== 0 && requester?.congregation_id) {
+        congregationId = requester.congregation_id;
+      }
+
       const ministries = await ministryService.list(congregationId);
       return reply.send(ministries);
     } catch (error: any) {

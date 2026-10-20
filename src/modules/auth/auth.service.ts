@@ -2,26 +2,55 @@ import bcrypt from 'bcrypt';
 import { prisma } from '../../shared/database/prisma.js';
 
 export class AuthService {
-  async register(data: { name: string; email: string; password: string; role: string; ministry: string }) {
-
+  async register(data: {
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+    ministry: string;
+    congregation_id?: string | null | undefined;
+  }) {
     const userExists = await prisma.user.findUnique({ where: { email: data.email } });
     if (userExists) {
       throw new Error('Este e-mail já está cadastrado.');
     }
 
-    let level = 2;
+    let level = 2; // Default: Líder de Ministério
     let ministry = data.ministry;
-    if (data.role === 'admin') {
+    let targetCongregationId = data.congregation_id || null;
+
+    if (data.role === 'admin' || data.role === 'admin_geral') {
       level = 0;
       ministry = 'all';
-    } else if (data.role === 'leader') {
+      targetCongregationId = null; // Admin Geral é global
+    } else if (data.role === 'admin_congregacao') {
       level = 1;
-    } else if (data.role === 'member' || data.role === 'operator') {
+      ministry = 'all'; // Admin de Congregação tem acesso a todos os ministérios da sua filial
+      if (!targetCongregationId) {
+        const sede = await prisma.congregation.findFirst({ where: { is_main: true } });
+        targetCongregationId = sede?.id || null;
+      }
+    } else if (data.role === 'leader' || data.role === 'lider_ministerio') {
       level = 2;
-    } else if (data.role === 'storymaker') {
-      level = 2;
-      if (!ministry || ministry === 'all') {
-        ministry = 'Multimídia';
+      if (!targetCongregationId) {
+        const sede = await prisma.congregation.findFirst({ where: { is_main: true } });
+        targetCongregationId = sede?.id || null;
+      }
+    } else if (
+      data.role === 'member' ||
+      data.role === 'voluntario' ||
+      data.role === 'storymaker' ||
+      data.role === 'operator'
+    ) {
+      level = 3;
+      if (!targetCongregationId) {
+        const sede = await prisma.congregation.findFirst({ where: { is_main: true } });
+        targetCongregationId = sede?.id || null;
+      }
+      if (data.role === 'storymaker') {
+        if (!ministry || ministry === 'all') {
+          ministry = 'Multimídia';
+        }
       }
     }
 
@@ -34,11 +63,15 @@ export class AuthService {
         password_hash,
         user_level: level,
         ministry_access: ministry,
+        congregation_id: targetCongregationId,
         profile: {
           create: { full_name: data.name }
         }
       },
-      include: { profile: true }
+      include: {
+        profile: true,
+        congregation: { select: { id: true, name: true, is_main: true } }
+      }
     });
 
     return newUser;
@@ -47,7 +80,10 @@ export class AuthService {
   async login(data: { email: string; password: string }) {
     const user = await prisma.user.findUnique({
       where: { email: data.email },
-      include: { profile: true }
+      include: {
+        profile: true,
+        congregation: { select: { id: true, name: true, is_main: true } }
+      }
     });
     if (!user) throw new Error('Credenciais inválidas.');
 
@@ -60,18 +96,27 @@ export class AuthService {
   // ==========================================
   // LISTAR USUÁRIOS (GET)
   // ==========================================
-  async getUsers() {
+  async getUsers(filterCongregationId?: string) {
+    const where: any = {};
+    if (filterCongregationId) {
+      where.congregation_id = filterCongregationId;
+    }
+
     const users = await prisma.user.findMany({
-      include: { profile: true },
-      // Ordenar pelos mais recentes
+      where,
+      include: {
+        profile: true,
+        congregation: { select: { id: true, name: true, is_main: true } }
+      },
       orderBy: { created_at: 'desc' }
     });
 
-    // Formatamos para o frontend entender facilmente
-    return users.map(u => {
-      let role = 'member';
-      if (u.user_level === 0) role = 'admin';
-      else if (u.user_level === 1) role = 'leader';
+    return users.map((u) => {
+      let role = 'voluntario';
+      if (u.user_level === 0) role = 'admin_geral';
+      else if (u.user_level === 1) role = 'admin_congregacao';
+      else if (u.user_level === 2) role = 'lider_ministerio';
+      else if (u.user_level === 3) role = 'voluntario';
 
       return {
         id: u.id,
@@ -79,7 +124,10 @@ export class AuthService {
         name: u.profile?.full_name || 'Sem nome',
         level: u.user_level,
         role,
-        ministry: u.ministry_access
+        ministry: u.ministry_access,
+        congregation_id: u.congregation_id,
+        congregation: u.congregation,
+        custom_permissions: (u as any).custom_permissions || []
       };
     });
   }
@@ -87,56 +135,92 @@ export class AuthService {
   // ==========================================
   // ATUALIZAR USUÁRIO (PUT)
   // ==========================================
-  async updateUser(id: string, data: { name?: string | undefined; email?: string | undefined; password?: string | undefined; role?: 'admin' | 'leader' | 'storymaker' | 'member' | 'operator' | undefined; ministry?: string | undefined }) {
+  async updateUser(
+    id: string,
+    data: {
+      name?: string | undefined;
+      email?: string | undefined;
+      password?: string | undefined;
+      role?: string | undefined;
+      ministry?: string | undefined;
+      congregation_id?: string | null | undefined;
+    }
+  ) {
     const userExists = await prisma.user.findUnique({ where: { id } });
     if (!userExists) throw new Error('Usuário não encontrado.');
 
-    // Prepara os dados básicos
     const updateData: any = {};
 
     if (data.role) {
-      if (data.role === 'admin') {
+      if (data.role === 'admin' || data.role === 'admin_geral') {
         updateData.user_level = 0;
         updateData.ministry_access = 'all';
-      } else if (data.role === 'leader') {
+        updateData.congregation_id = null;
+      } else if (data.role === 'admin_congregacao') {
         updateData.user_level = 1;
-      } else if (data.role === 'member' || data.role === 'operator') {
+        updateData.ministry_access = 'all';
+        if (data.congregation_id !== undefined) {
+          updateData.congregation_id = data.congregation_id;
+        }
+      } else if (data.role === 'leader' || data.role === 'lider_ministerio') {
         updateData.user_level = 2;
-      } else if (data.role === 'storymaker') {
-        updateData.user_level = 2;
-        if (!data.ministry || data.ministry === 'all') {
-          updateData.ministry_access = 'Multimídia';
+        if (data.congregation_id !== undefined) {
+          updateData.congregation_id = data.congregation_id;
+        }
+      } else if (
+        data.role === 'member' ||
+        data.role === 'voluntario' ||
+        data.role === 'storymaker' ||
+        data.role === 'operator'
+      ) {
+        updateData.user_level = 3;
+        if (data.congregation_id !== undefined) {
+          updateData.congregation_id = data.congregation_id;
+        }
+        if (data.role === 'storymaker') {
+          if (!data.ministry || data.ministry === 'all') {
+            updateData.ministry_access = 'Multimídia';
+          }
         }
       }
     }
+
+    if (data.congregation_id !== undefined && !['admin', 'admin_geral'].includes(data.role || '')) {
+      updateData.congregation_id = data.congregation_id;
+    }
+
     if (data.ministry !== undefined) {
       updateData.ministry_access = data.ministry;
     }
 
-    // Verifica se o email novo já pertence a outra pessoa
     if (data.email && data.email !== userExists.email) {
       const emailTaken = await prisma.user.findUnique({ where: { email: data.email } });
       if (emailTaken) throw new Error('Este e-mail já está em uso por outro usuário.');
       updateData.email = data.email;
     }
 
-    // Se ele digitou uma senha nova, criptografa! Se não, o banco ignora.
     if (data.password && data.password.trim() !== '') {
       const salt = await bcrypt.genSalt(10);
       updateData.password_hash = await bcrypt.hash(data.password, salt);
     }
 
-    // Executa o Update no banco
     const updatedUser = await prisma.user.update({
       where: { id },
       data: {
         ...updateData,
-        // Atualiza o nome na tabela de Perfil
-        profile: data.name ? {
-          update: { full_name: data.name }
-        } : undefined
+        profile: data.name
+          ? {
+              upsert: {
+                create: { full_name: data.name },
+                update: { full_name: data.name }
+              }
+            }
+          : undefined
       },
-      include: { profile: true }
+      include: {
+        profile: true,
+        congregation: { select: { id: true, name: true, is_main: true } }
+      }
     });
 
     return updatedUser;
@@ -149,10 +233,7 @@ export class AuthService {
     const userExists = await prisma.user.findUnique({ where: { id } });
     if (!userExists) throw new Error('Usuário não encontrado.');
 
-    // Apaga o usuário (Se o seu schema.prisma não tiver onDelete: Cascade no Profile,
-    // avisarei caso dê erro de foreign key, mas o Fastify tratará isso).
     await prisma.user.delete({ where: { id } });
-
     return true;
   }
 
@@ -168,7 +249,7 @@ export class AuthService {
       where: { id },
       data: {
         password_hash,
-        must_change_password: false // 👈 A trava é removida aqui
+        must_change_password: false
       }
     });
 

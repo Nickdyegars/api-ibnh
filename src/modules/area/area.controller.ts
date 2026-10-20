@@ -1,6 +1,6 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
-import { MinistryAreaService } from './area.service.js'; // O service que criamos antes
-import { areaBodySchema } from './area.schemas.js';
+import { MinistryAreaService } from './area.service.js';
+import { areaBodySchema, getAreasQuerySchema } from './area.schemas.js';
 import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 const areaService = new MinistryAreaService();
@@ -9,9 +9,8 @@ export class AreaController {
 
   async list(request: FastifyRequest, reply: FastifyReply) {
     try {
-      // Pega o filtro da query (ex: ?ministry=Multimídia)
-      const { ministry } = request.query as { ministry: string };
-      const areas = await areaService.getAreas(ministry);
+      const { ministry, congregationId } = getAreasQuerySchema.parse(request.query);
+      const areas = await areaService.getAreas(ministry, congregationId);
       return reply.send(areas);
     } catch (error: any) {
       return reply.status(500).send({ error: 'Erro ao buscar áreas' });
@@ -38,7 +37,7 @@ export class AreaController {
         }
       }
 
-      const newArea = await areaService.createArea(data.name, data.ministry) as any;
+      const newArea = await areaService.createArea(data.name, data.ministry, data.congregation_id) as any;
 
       // 📝 LOG: Criação de nova área (ex: Projeção, Câmera)
       AuditService.log(requester.sub, 'CREATE', 'MINISTRY_AREA', newArea?.id, data);

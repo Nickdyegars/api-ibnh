@@ -25,7 +25,10 @@ export async function galleryRoutes(app: FastifyInstance) {
         const ministry = (requester.ministry_access || '').toLowerCase();
         const isMedia = ministry === 'multimídia' || ministry === 'multimidia' || ministry === 'mídia' || ministry === 'midia';
 
-        if (requester.level !== 0 && !isMedia) {
+        const requesterLevel = Number(requester?.level ?? requester?.user_level ?? 3);
+        const hasCustom = Array.isArray(requester?.custom_permissions) && requester.custom_permissions.includes('galeria');
+
+        if (requesterLevel > 1 && !isMedia && !hasCustom) {
            return reply.status(403).send({ error: 'Acesso negado. Apenas a equipe de Multimídia pode gerenciar a galeria.' });
         }
       } catch (err) {

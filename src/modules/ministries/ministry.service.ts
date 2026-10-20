@@ -58,7 +58,7 @@ export class MinistryService {
           equals: cleanName,
           mode: 'insensitive'
         },
-        congregation_id: targetCongregationId || undefined
+        ...(targetCongregationId ? { congregation_id: targetCongregationId } : {})
       }
     });
 
@@ -101,7 +101,7 @@ export class MinistryService {
           equals: cleanName,
           mode: 'insensitive'
         },
-        congregation_id: targetCongregationId || undefined
+        ...(targetCongregationId ? { congregation_id: targetCongregationId } : {})
       }
     });
 

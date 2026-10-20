@@ -24,6 +24,7 @@ model User {
   admin_id          String?
   ministry_access   String?   @default("all")
   must_change_password Boolean @default(true)
+  custom_permissions String[]  @default([])
 
   congregation_id   String?   @db.Uuid
   congregation      Congregation? @relation(fields: [congregation_id], references: [id], onDelete: SetNull)
@@ -478,6 +479,15 @@ model LandingPageConfig {
   updated_at         DateTime @updatedAt
   
   @@map("landing_page_configs")
+  @@schema("app")
+}
+
+model SystemPermission {
+  id               String    @id @db.VarChar(50)
+  role_permissions Json
+  updated_at       DateTime? @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@map("system_permissions")
   @@schema("app")
 }
 

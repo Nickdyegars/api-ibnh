@@ -31,17 +31,18 @@ export class RosterService {
         const ministry = await prisma.ministry.findFirst({
             where: {
                 name: { equals: data.ministry, mode: 'insensitive' },
-                congregation_id: targetCongregationId || undefined
+                ...(targetCongregationId ? { congregation_id: targetCongregationId } : {})
             }
         });
 
         if (!ministry) throw new Error(`Ministério '${data.ministry}' não encontrado para esta congregação.`);
 
-        // Busca todos os membros do ministério nesta congregação para termos um mapa rápido por nome
+        // Busca todos os membros ATIVOS do ministério nesta congregação para termos um mapa rápido por nome
         const membersList = await prisma.member.findMany({
             where: {
                 ministry_id: ministry.id,
-                congregation_id: targetCongregationId || undefined
+                ...(targetCongregationId ? { congregation_id: targetCongregationId } : {}),
+                is_active: true
             }
         });
         const memberMap = new Map(membersList.map(m => [m.name.trim(), m]));
@@ -173,6 +174,7 @@ export class RosterService {
 
     async generateRosterPreview(data: any) {
         const { month, ministry: ministryName, teamSize, restrictions, louvorMode, congregationId, customCultDays } = data;
+        const safeRestrictions: any[] = Array.isArray(restrictions) ? restrictions : [];
 
         let targetCongregationId = congregationId;
         let cultDaysList: string[] = [];
@@ -223,22 +225,25 @@ export class RosterService {
         const ministry = await prisma.ministry.findFirst({
             where: {
                 name: { equals: ministryName, mode: 'insensitive' },
-                congregation_id: targetCongregationId || undefined
+                ...(targetCongregationId ? { congregation_id: targetCongregationId } : {})
             }
         });
 
         if (!ministry) throw new Error("Ministério não encontrado para esta congregação");
 
+        // Busca apenas membros estritamente ATIVOS
         const members: any[] = await prisma.member.findMany({
             where: {
                 ministry_id: ministry.id,
-                congregation_id: targetCongregationId || undefined,
+                ...(targetCongregationId ? { congregation_id: targetCongregationId } : {}),
                 is_active: true
             },
             select: { name: true, role: true, team: true, areas: { include: { area: true } } }
         });
 
         if (members.length === 0) throw new Error("Nenhum membro ativo cadastrado neste ministério para esta congregação");
+
+        const activeMemberNames = new Set(members.map(m => m.name.trim()));
 
         const [year, monthNum] = month.split('-').map(Number);
         const date = new Date(year, monthNum - 1, 1);
@@ -273,7 +278,6 @@ export class RosterService {
         const generatedShifts: any[] = [];
 
         // 👇 VERIFICAÇÃO BLINDADA PARA A MÍDIA 👇
-        // Aceita Mídia, Midia, Multimídia ou Multimidia
         const isMedia = ministryName.includes('Mídia') || ministryName.includes('Midia') || ministryName.includes('Multimídia') || ministryName.includes('Multimidia');
 
         // ==============================================================
@@ -281,46 +285,41 @@ export class RosterService {
         // ==============================================================
         if (ministryName === 'Louvor' && louvorMode === 'EQUIPE') {
 
-            // 1. Agrupa os membros por equipes
+            // 1. Agrupa os membros por equipes (somente ativos)
             const teamsMap = members.reduce((acc, m: any) => {
                 if (m.team && m.team.name && m.team.name.trim() !== '') {
                     const tName = m.team.name.trim();
                     if (!acc[tName]) acc[tName] = [];
-                    // Já pegamos o "role" do membro para exibir bonitinho (ex: Bateria, Baixo, Vocal)
-                    acc[tName].push({ name: m.name, role: m.role || 'Membro' });
+                    acc[tName].push({ name: m.name.trim(), role: m.role || 'Membro' });
                 }
                 return acc;
             }, {} as Record<string, { name: string, role: string }[]>);
 
             const allTeamNames = Object.keys(teamsMap);
-            if (allTeamNames.length === 0) throw new Error("Nenhuma equipe (Vocal ou Banda) cadastrada!");
+            if (allTeamNames.length === 0) throw new Error("Nenhuma equipe (Vocal ou Banda) cadastrada com membros ativos!");
 
-            // Separa as equipes baseando-se na palavra 'VOCAL'
             const vocalTeams = allTeamNames.filter(t => t.toUpperCase().includes('VOCAL'));
             const bandTeams = allTeamNames.filter(t => !t.toUpperCase().includes('VOCAL'));
 
             if (vocalTeams.length === 0) throw new Error("Nenhum grupo de Vocal cadastrado! (O nome da equipe deve conter a palavra 'VOCAL')");
             if (bandTeams.length === 0) throw new Error("Nenhuma Banda cadastrada!");
 
-            // 2. Contadores de uso para garantir a rotação justa e não sobrecarregar ninguém
             const vocalUsageCount: Record<string, number> = {};
             vocalTeams.forEach(t => vocalUsageCount[t] = 0);
 
             const bandUsageCount: Record<string, number> = {};
             bandTeams.forEach(t => bandUsageCount[t] = 0);
 
-            // 3. Mapeia as semanas com a lógica rigorosa do TypeScript (Domingo -> Quinta)
-            const [year, monthNum] = month.split('-').map(Number);
-            const date = new Date(year, monthNum - 1, 1);
+            const [yearL, monthNumL] = month.split('-').map(Number);
+            const dateL = new Date(yearL, monthNumL - 1, 1);
             const safeServices: any[] = [];
 
-            while (date.getMonth() === monthNum - 1) {
-                const dayOfWeek = date.getDay();
+            while (dateL.getMonth() === monthNumL - 1) {
+                const dayOfWeek = dateL.getDay();
                 if (allowedDaysOfWeek.includes(dayOfWeek)) {
-                    const rawDate = date.toISOString().split('T')[0]!;
+                    const rawDate = dateL.toISOString().split('T')[0]!;
                     const actualDate = new Date(rawDate + 'T12:00:00');
 
-                    // Acha a data exata do domingo desta semana para servir como "Chave" do Bloco
                     const tempDate = new Date(rawDate + 'T12:00:00');
                     const diff = tempDate.getDate() - tempDate.getDay();
                     const sundayOfThisWeek = new Date(tempDate.setDate(diff));
@@ -333,7 +332,7 @@ export class RosterService {
                         weekKey
                     });
                 }
-                date.setDate(date.getDate() + 1);
+                dateL.setDate(dateL.getDate() + 1);
             }
 
             const safeServicesByWeek = safeServices.reduce((acc, s) => {
@@ -342,14 +341,15 @@ export class RosterService {
                 return acc;
             }, {} as Record<string, any[]>);
 
-            // 4. Busca o último turno do mês passado (Para verificar se sobrou uma Quinta-feira órfã)
-            const prevMonthDate = new Date(year, monthNum - 2, 1);
+            // 4. Busca o último turno do mês anterior para verificar continuidade
+            const prevMonthDate = new Date(yearL, monthNumL - 2, 1);
             const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
             const lastSchedulePrevMonth = await prisma.schedule.findFirst({
                 where: {
                     ministry_id: ministry.id,
-                    month_reference: prevMonthStr
+                    month_reference: prevMonthStr,
+                    ...(targetCongregationId ? { congregation_id: targetCongregationId } : {})
                 },
                 include: {
                     shifts: {
@@ -360,21 +360,14 @@ export class RosterService {
                 }
             });
 
-            let carryOverTeam: string[] = [];
             let lastSundayWeekKey = "";
-
             const lastShift = lastSchedulePrevMonth?.shifts?.[0];
             if (lastShift) {
                 const shiftDateObj = new Date(lastShift.shift_date);
                 const rawLast = shiftDateObj.toISOString().split('T')[0]!;
                 const tempD = new Date(rawLast + 'T12:00:00');
 
-                // Só herda se o último turno do mês passado tiver sido um DOMINGO
                 if (tempD.getDay() === 0 && lastShift.members) {
-                    carryOverTeam = lastShift.members.map(m =>
-                        m.area_name ? `${m.member.name} (${m.area_name})` : m.member.name
-                    );
-
                     const diff = tempD.getDate() - tempD.getDay();
                     const lastSunday = new Date(tempD.setDate(diff));
                     lastSundayWeekKey = lastSunday.toISOString().split('T')[0]!;
@@ -383,23 +376,36 @@ export class RosterService {
 
             let isFirstWeek = true;
 
-            // 5. Itera sobre as semanas para montar o bloco Domingo+Quinta
             Object.entries(safeServicesByWeek).forEach(([weekKey, weekServices]: [string, any]) => {
                 let weeklyShiftTeam: string[] = [];
 
-                // CONTINUIDADE: A primeira quinta do mês herda a equipe do último domingo
-                if (isFirstWeek && weekKey === lastSundayWeekKey && carryOverTeam.length > 0) {
-                    weeklyShiftTeam = [...carryOverTeam];
+                // CONTINUIDADE: Apenas membros ATIVOS e sem restrições herdam a escala
+                if (isFirstWeek && weekKey === lastSundayWeekKey && lastShift && Array.isArray(lastShift.members) && lastShift.members.length > 0) {
                     isFirstWeek = false;
 
-                    weekServices.forEach((s: any) => {
-                        generatedShifts.push({
-                            date: s.date,
-                            dayName: s.dayName,
-                            team: [...weeklyShiftTeam]
-                        });
+                    const validCarryMembers = lastShift.members.filter((m: any) => {
+                        const mName = m.member?.name?.trim();
+                        const isMemberActive = m.member?.is_active && activeMemberNames.has(mName);
+                        const hasRest = weekServices.some((s: any) =>
+                            safeRestrictions.some((r: any) => r.member?.trim() === mName && r.date === s.rawDate)
+                        );
+                        return isMemberActive && !hasRest;
                     });
-                    return;
+
+                    if (validCarryMembers.length > 0) {
+                        weeklyShiftTeam = validCarryMembers.map((m: any) =>
+                            m.area_name ? `${m.member.name.trim()} (${m.area_name})` : (m.member.role ? `${m.member.name.trim()} (${m.member.role})` : m.member.name.trim())
+                        );
+
+                        weekServices.forEach((s: any) => {
+                            generatedShifts.push({
+                                date: s.date,
+                                dayName: s.dayName,
+                                team: [...weeklyShiftTeam]
+                            });
+                        });
+                        return;
+                    }
                 }
 
                 isFirstWeek = false;
@@ -421,52 +427,46 @@ export class RosterService {
                 let assignedVocalTeamName: string | null = null;
                 let assignedBandTeamName: string | null = null;
 
-                // Busca um Grupo Vocal disponível para a semana inteira (Domingo e Quinta)
                 for (const candidateVocal of sortedVocals) {
                     const vocalMembers = teamsMap[candidateVocal] || [];
                     const isAvailable = weekServices.every((s: any) =>
-                        !restrictions?.some((r: any) => vocalMembers.some(m => m.name === r.member) && r.date === s.rawDate)
+                        !safeRestrictions.some((r: any) => vocalMembers.some((m: any) => m.name.trim() === r.member?.trim()) && r.date === s.rawDate)
                     );
 
                     if (isAvailable) {
                         assignedVocalTeamName = candidateVocal;
-                        // 👇 CORREÇÃO: Incremento seguro
                         vocalUsageCount[candidateVocal] = (vocalUsageCount[candidateVocal] || 0) + 1;
                         break;
                     }
                 }
 
-                // Busca uma Banda disponível para a semana inteira
                 for (const candidateBand of sortedBands) {
                     const bandMembers = teamsMap[candidateBand] || [];
                     const isAvailable = weekServices.every((s: any) =>
-                        !restrictions?.some((r: any) => bandMembers.some(m => m.name === r.member) && r.date === s.rawDate)
+                        !safeRestrictions.some((r: any) => bandMembers.some((m: any) => m.name.trim() === r.member?.trim()) && r.date === s.rawDate)
                     );
 
                     if (isAvailable) {
                         assignedBandTeamName = candidateBand;
-                        // 👇 CORREÇÃO: Incremento seguro
                         bandUsageCount[candidateBand] = (bandUsageCount[candidateBand] || 0) + 1;
                         break;
                     }
                 }
 
-                // Monta a equipe fundindo o Vocal sorteado e a Banda sorteada
                 if (assignedVocalTeamName) {
                     const vocals = teamsMap[assignedVocalTeamName] || [];
-                    vocals.forEach(v => weeklyShiftTeam.push(`${v.name} (${v.role || 'Vocal'})`));
+                    vocals.forEach((v: any) => weeklyShiftTeam.push(`${v.name} (${v.role || 'Vocal'})`));
                 } else {
                     weeklyShiftTeam.push('⚠️ SEM VOCAL (Restrições)');
                 }
 
                 if (assignedBandTeamName) {
                     const bandMembers = teamsMap[assignedBandTeamName] || [];
-                    bandMembers.forEach(b => weeklyShiftTeam.push(`${b.name} (${b.role || 'Banda'})`));
+                    bandMembers.forEach((b: any) => weeklyShiftTeam.push(`${b.name} (${b.role || 'Banda'})`));
                 } else {
                     weeklyShiftTeam.push('⚠️ SEM BANDA (Restrições)');
                 }
 
-                // Replica a equipe combinada para todos os cultos do bloco
                 weekServices.forEach((s: any) => {
                     generatedShifts.push({
                         date: s.date,
@@ -490,17 +490,16 @@ export class RosterService {
             }
 
             const memberUsageCount: Record<string, number> = {};
-            members.forEach(m => memberUsageCount[m.name] = 0);
+            members.forEach(m => memberUsageCount[m.name.trim()] = 0);
 
-            const [year, monthNum] = month.split('-').map(Number);
-            const date = new Date(year, monthNum - 1, 1);
-            const services: any[] = [];
+            const [yearM, monthNumM] = month.split('-').map(Number);
+            const dateM = new Date(yearM, monthNumM - 1, 1);
+            const servicesM: any[] = [];
 
-            while (date.getMonth() === monthNum - 1) {
-                const dayOfWeek = date.getDay();
+            while (dateM.getMonth() === monthNumM - 1) {
+                const dayOfWeek = dateM.getDay();
                 if (allowedDaysOfWeek.includes(dayOfWeek)) {
-                    // Adicionando '!' para garantir ao TS que a string existe
-                    const rawDate = date.toISOString().split('T')[0]!;
+                    const rawDate = dateM.toISOString().split('T')[0]!;
                     const actualDate = new Date(rawDate + 'T12:00:00');
 
                     const tempDate = new Date(rawDate + 'T12:00:00');
@@ -508,29 +507,30 @@ export class RosterService {
                     const sundayOfThisWeek = new Date(tempDate.setDate(diff));
                     const weekKey = sundayOfThisWeek.toISOString().split('T')[0]!;
 
-                    services.push({
+                    servicesM.push({
                         date: actualDate.toLocaleDateString('pt-BR'),
                         rawDate,
                         dayName: dayNamesPt[dayOfWeek] || 'Culto',
                         weekKey
                     });
                 }
-                date.setDate(date.getDate() + 1);
+                dateM.setDate(dateM.getDate() + 1);
             }
 
-            const servicesByWeek = services.reduce((acc, s) => {
+            const servicesByWeekM = servicesM.reduce((acc, s) => {
                 if (!acc[s.weekKey]) acc[s.weekKey] = [];
                 acc[s.weekKey].push(s);
                 return acc;
             }, {} as Record<string, any[]>);
 
-            const prevMonthDate = new Date(year, monthNum - 2, 1);
+            const prevMonthDate = new Date(yearM, monthNumM - 2, 1);
             const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
             const lastSchedulePrevMonth = await prisma.schedule.findFirst({
                 where: {
                     ministry_id: ministry.id,
-                    month_reference: prevMonthStr
+                    month_reference: prevMonthStr,
+                    ...(targetCongregationId ? { congregation_id: targetCongregationId } : {})
                 },
                 include: {
                     shifts: {
@@ -541,81 +541,85 @@ export class RosterService {
                 }
             });
 
-            let carryOverTeam: string[] = [];
             let lastSundayWeekKey = "";
-
             const lastShift = lastSchedulePrevMonth?.shifts?.[0];
             if (lastShift) {
                 const shiftDateObj = new Date(lastShift.shift_date);
-                // Adicionando '!' para garantir ao TS
                 const rawLast = shiftDateObj.toISOString().split('T')[0]!;
                 const tempD = new Date(rawLast + 'T12:00:00');
 
                 if (tempD.getDay() === 0 && lastShift.members) {
-                    carryOverTeam = lastShift.members.map(m =>
-                        m.area_name ? `${m.member.name} (${m.area_name})` : m.member.name
-                    );
-
                     const diff = tempD.getDate() - tempD.getDay();
                     const lastSunday = new Date(tempD.setDate(diff));
-                    // Adicionando '!' para garantir ao TS
                     lastSundayWeekKey = lastSunday.toISOString().split('T')[0]!;
                 }
             }
 
             let isFirstWeek = true;
 
-            Object.entries(servicesByWeek).forEach(([weekKey, weekServices]: [string, any]) => {
-
+            Object.entries(servicesByWeekM).forEach(([weekKey, weekServices]: [string, any]) => {
                 let weeklyShiftTeam: string[] = [];
                 const busyMembers = new Set<string>();
 
-                if (isFirstWeek && weekKey === lastSundayWeekKey && carryOverTeam.length > 0) {
-                    weeklyShiftTeam = [...carryOverTeam];
-                    isFirstWeek = false;
-
-                    weekServices.forEach((s: any) => {
-                        generatedShifts.push({
-                            date: s.date,
-                            dayName: s.dayName,
-                            team: [...weeklyShiftTeam]
-                        });
-                    });
-                    return;
-                }
-
+                const isContinuityWeek = isFirstWeek && weekKey === lastSundayWeekKey && !!lastShift && Array.isArray(lastShift.members);
                 isFirstWeek = false;
 
                 for (const area of activeAreas) {
-                    const eligibleMembers = members.filter(m =>
-                        m.areas.some((a: any) => a.area_id === area.id)
-                    );
+                    let assignedCandidateName: string | null = null;
 
-                    const pool = [...eligibleMembers].sort((a, b) => {
-                        const countA = memberUsageCount[a.name] || 0;
-                        const countB = memberUsageCount[b.name] || 0;
-                        if (countA !== countB) return countA - countB;
-                        return Math.random() - 0.5;
-                    });
-
-                    let assigned = false;
-                    for (const candidate of pool) {
-                        const hasRestrictionInWeek = weekServices.some((s: any) =>
-                            restrictions.some((r: any) => r.member === candidate.name && r.date === s.rawDate)
+                    // Se for a semana de continuidade do mês anterior, tenta manter quem estava no último domingo
+                    // MAS APENAS se o membro estiver ATIVO e sem restrições nesta semana!
+                    if (isContinuityWeek && lastShift) {
+                        const carryAssignment = lastShift.members.find((sm: any) =>
+                            sm.area_name && sm.area_name.toLowerCase().trim() === area.name.toLowerCase().trim()
                         );
+                        if (carryAssignment && carryAssignment.member) {
+                            const cName = carryAssignment.member.name.trim();
+                            const isMemberActive = carryAssignment.member.is_active && activeMemberNames.has(cName);
+                            const hasRestInWeek = weekServices.some((s: any) =>
+                                safeRestrictions.some((r: any) => r.member?.trim() === cName && r.date === s.rawDate)
+                            );
+                            const isBusy = busyMembers.has(cName);
 
-                        const isBusyInAnotherArea = busyMembers.has(candidate.name);
-
-                        if (!hasRestrictionInWeek && !isBusyInAnotherArea) {
-                            weeklyShiftTeam.push(`${candidate.name} (${area.name})`);
-                            busyMembers.add(candidate.name);
-                            memberUsageCount[candidate.name] = (memberUsageCount[candidate.name] || 0) + 1;
-                            assigned = true;
-                            break;
+                            if (isMemberActive && !hasRestInWeek && !isBusy) {
+                                assignedCandidateName = cName;
+                            }
                         }
                     }
 
-                    if (!assigned) {
+                    // Se não herdou por continuidade (ou o membro anterior estava inativo / com restrição),
+                    // sorteia rigorosamente entre os membros ATIVOS vinculados a esta área!
+                    if (!assignedCandidateName) {
+                        const eligibleMembers = members.filter(m =>
+                            m.areas.some((a: any) => a.area_id === area.id)
+                        );
+
+                        const pool = [...eligibleMembers].sort((a, b) => {
+                            const countA = memberUsageCount[a.name.trim()] || 0;
+                            const countB = memberUsageCount[b.name.trim()] || 0;
+                            if (countA !== countB) return countA - countB;
+                            return Math.random() - 0.5;
+                        });
+
+                        for (const candidate of pool) {
+                            const candidateName = candidate.name.trim();
+                            const hasRestrictionInWeek = weekServices.some((s: any) =>
+                                safeRestrictions.some((r: any) => r.member?.trim() === candidateName && r.date === s.rawDate)
+                            );
+                            const isBusyInAnotherArea = busyMembers.has(candidateName);
+
+                            if (!hasRestrictionInWeek && !isBusyInAnotherArea) {
+                                assignedCandidateName = candidateName;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (assignedCandidateName) {
+                        weeklyShiftTeam.push(`${assignedCandidateName} (${area.name})`);
+                        busyMembers.add(assignedCandidateName);
+                        memberUsageCount[assignedCandidateName] = (memberUsageCount[assignedCandidateName] || 0) + 1;
+                    } else {
                         weeklyShiftTeam.push(`⚠️ FALTA GENTE (${area.name})`);
                     }
                 }
@@ -650,9 +654,9 @@ export class RosterService {
                         continue;
                     }
 
-                    const candidate = candidateObj.name;
+                    const candidate = candidateObj.name.trim();
                     const isAvailable = weekServices.every((s: any) =>
-                        !restrictions.some((r: any) => r.member === candidate && r.date === s.rawDate)
+                        !safeRestrictions.some((r: any) => r.member?.trim() === candidate && r.date === s.rawDate)
                     );
 
                     if (isAvailable && !weeklyTeam.includes(candidate)) {
@@ -706,7 +710,8 @@ export class RosterService {
                 const member = await tx.member.findFirst({
                     where: {
                         ministry_id: ministryId,
-                        name: rawName
+                        name: rawName,
+                        is_active: true
                     }
                 });
 
@@ -727,9 +732,7 @@ export class RosterService {
 
     async syncRosterToCalendar(rosterData: any) {
         // 1. Busca Ministério e membros com e-mail
-        const ministry = await prisma.ministry.findUnique({
-            where: { name: rosterData.ministry }
-        });
+        const ministry = await prisma.ministry.findFirst({ where: { name: { equals: rosterData.ministry, mode: 'insensitive' } } });
         if (!ministry) throw new Error(`Ministério '${rosterData.ministry}' não encontrado.`);
 
         const membersList = await prisma.member.findMany({

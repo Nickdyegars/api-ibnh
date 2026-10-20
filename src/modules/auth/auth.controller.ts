@@ -1,8 +1,8 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthService } from './auth.service.js';
 import { registerSchema, loginSchema, updateUserSchema, firstAccessPasswordSchema } from './auth.schemas.js';
-// 👇 1. Importando o nosso serviço de Auditoria 👇
-import { AuditService } from '../../shared/services/audit/audit.service.js'; 
+import { AuditService } from '../../shared/services/audit/audit.service.js';
+import { prisma } from '../../shared/database/prisma.js';
 
 const authService = new AuthService();
 
@@ -11,20 +11,32 @@ export class AuthController {
   async register(request: FastifyRequest, reply: FastifyReply) {
     try {
       const requester = request.user as any;
-      if (requester.level !== 0) {
+      const requesterLevel = Number(requester.level ?? requester.user_level ?? 2);
+
+      // Apenas Admin Geral (0) e Admin de Congregação (1) podem cadastrar usuários
+      if (requesterLevel > 1) {
         return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem criar novos usuários.' });
       }
 
       const data = registerSchema.parse(request.body);
+
+      // Trava para Admin de Congregação (1):
+      // Só pode criar líderes (2) ou voluntários (3) na sua PRÓPRIA congregação
+      if (requesterLevel === 1) {
+        if (['admin', 'admin_geral', 'admin_congregacao'].includes(data.role)) {
+          return reply.status(403).send({ error: 'Você só tem permissão para cadastrar Líderes de Ministério ou Voluntários.' });
+        }
+        data.congregation_id = requester.congregation_id;
+      }
+
       const user = await authService.register(data);
 
-      // 📝 LOG DE AUDITORIA: Quem criou e quem foi criado
       AuditService.log(
-        requester.sub,                 // Quem fez (Admin)
-        'CREATE',                      // Ação
-        'USER',                        // Onde
-        user.id,                       // ID do novo usuário criado
-        { email: user.email, level: user.user_level } // O que foi criado
+        requester.sub,
+        'CREATE',
+        'USER',
+        user.id,
+        { email: user.email, level: user.user_level, congregation_id: user.congregation_id }
       );
 
       return reply.status(201).send({
@@ -34,7 +46,9 @@ export class AuthController {
           email: user.email,
           name: user.profile?.full_name,
           level: user.user_level,
-          ministry: user.ministry_access
+          ministry: user.ministry_access,
+          congregation_id: user.congregation_id,
+          congregation: user.congregation
         }
       });
     } catch (error: any) {
@@ -54,17 +68,22 @@ export class AuthController {
         sub: user.id,
         email: user.email,
         level: user.user_level,
-        ministry_access: user.ministry_access
+        ministry_access: user.ministry_access,
+        congregation_id: user.congregation_id
       });
 
-      // 📝 LOG DE AUDITORIA: Como no login não temos request.user ainda (pois ele está entrando agora), usamos o ID do próprio usuário retornado pelo banco.
       AuditService.log(
-        user.id,                       // O próprio usuário
-        'LOGIN',                       // Ação
-        'AUTH',                        // Onde
-        user.id,                       // ID do recurso
-        { email: user.email }          // Detalhes extras
+        user.id,
+        'LOGIN',
+        'AUTH',
+        user.id,
+        { email: user.email }
       );
+
+      let roleName = 'voluntario';
+      if (user.user_level === 0) roleName = 'admin_geral';
+      else if (user.user_level === 1) roleName = 'admin_congregacao';
+      else if (user.user_level === 2) roleName = 'lider_ministerio';
 
       return reply.send({
         token,
@@ -73,7 +92,11 @@ export class AuthController {
           name: (user as any).profile?.full_name || user.email.split('@')[0],
           email: user.email,
           level: user.user_level,
+          role: roleName,
           ministry_access: user.ministry_access,
+          congregation_id: user.congregation_id,
+          congregation: (user as any).congregation,
+          custom_permissions: (user as any).custom_permissions || [],
           mustChangePassword: user.must_change_password
         }
       });
@@ -92,7 +115,6 @@ export class AuthController {
 
       await authService.updateFirstPassword(user.sub, newPassword);
 
-      // 📝 LOG DE AUDITORIA: Usuário trocou a senha padrão
       AuditService.log(
         user.sub,
         'UPDATE_FIRST_PASSWORD',
@@ -112,11 +134,15 @@ export class AuthController {
   async getUsers(request: FastifyRequest, reply: FastifyReply) {
     try {
       const requester = request.user as any;
-      if (requester.level !== 0) {
+      const requesterLevel = Number(requester.level ?? requester.user_level ?? 2);
+
+      if (requesterLevel > 1) {
         return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem listar os usuários do sistema.' });
       }
 
-      const users = await authService.getUsers();
+      // Se for Admin de Congregação (1), só lista usuários da sua congregação
+      const filterCongregation = requesterLevel === 1 ? requester.congregation_id : undefined;
+      const users = await authService.getUsers(filterCongregation);
       return reply.send(users);
     } catch (error: any) {
       return reply.status(500).send({ error: 'Erro ao buscar usuários do banco de dados.' });
@@ -127,22 +153,43 @@ export class AuthController {
     try {
       const { id } = request.params as { id: string };
       const requester = request.user as any;
+      const requesterLevel = Number(requester.level ?? requester.user_level ?? 2);
 
-      if (requester.level !== 0 && requester.sub !== id) {
+      const targetUser = await prisma.user.findUnique({ where: { id } });
+      if (!targetUser) {
+        return reply.status(404).send({ error: 'Usuário não encontrado.' });
+      }
+
+      // Próprio usuário editando seu perfil
+      if (requester.sub === id) {
+        const data = updateUserSchema.parse(request.body);
+        delete data.role;
+        delete data.ministry;
+        delete data.congregation_id;
+        const user = await authService.updateUser(id, data);
+        return reply.send({ message: 'Perfil atualizado com sucesso!', user });
+      }
+
+      // Se não for o próprio usuário, precisa ser nível 0 ou 1
+      if (requesterLevel > 1) {
         return reply.status(403).send({ error: 'Acesso negado. Você só pode atualizar o seu próprio perfil.' });
       }
 
       const data = updateUserSchema.parse(request.body);
 
-      if (requester.level !== 0) {
-        delete data.role;
-        delete data.ministry;
+      // Trava para Admin de Congregação (1)
+      if (requesterLevel === 1) {
+        if (targetUser.congregation_id !== requester.congregation_id || targetUser.user_level < 2) {
+          return reply.status(403).send({ error: 'Você não tem permissão para alterar este usuário.' });
+        }
+        if (data.role && ['admin', 'admin_geral', 'admin_congregacao'].includes(data.role)) {
+          return reply.status(403).send({ error: 'Você não tem permissão para conceder este nível de acesso.' });
+        }
+        data.congregation_id = requester.congregation_id;
       }
 
       const user = await authService.updateUser(id, data);
 
-      // 📝 LOG DE AUDITORIA: Edição de dados
-      // Passamos o "data" no detalhe para saber exatamente quais campos foram alterados!
       AuditService.log(
         requester.sub,
         'UPDATE',
@@ -164,8 +211,9 @@ export class AuthController {
     try {
       const { id } = request.params as { id: string };
       const requester = request.user as any;
+      const requesterLevel = Number(requester.level ?? requester.user_level ?? 2);
 
-      if (requester.level !== 0) {
+      if (requesterLevel > 1) {
         return reply.status(403).send({ error: 'Acesso negado. Apenas administradores podem excluir usuários.' });
       }
 
@@ -173,9 +221,20 @@ export class AuthController {
         return reply.status(400).send({ error: 'Você não pode excluir sua própria conta por segurança.' });
       }
 
+      const targetUser = await prisma.user.findUnique({ where: { id } });
+      if (!targetUser) {
+        return reply.status(404).send({ error: 'Usuário não encontrado.' });
+      }
+
+      // Admin de congregação só pode excluir líderes e voluntários da sua própria congregação
+      if (requesterLevel === 1) {
+        if (targetUser.congregation_id !== requester.congregation_id || targetUser.user_level < 2) {
+          return reply.status(403).send({ error: 'Você não tem permissão para excluir este usuário.' });
+        }
+      }
+
       await authService.deleteUser(id);
 
-      // 📝 LOG DE AUDITORIA: Conta apagada (Extremamente importante)
       AuditService.log(
         requester.sub,
         'DELETE',

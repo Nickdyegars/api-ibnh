@@ -15,7 +15,12 @@ export async function repertorioRoutes(app: FastifyInstance) {
         await request.jwtVerify();
         const requester = request.user as any;
         
-        if (requester.level !== 0 && requester.level !== 2) {
+        const requesterLevel = Number(requester?.level ?? requester?.user_level ?? 3);
+        const ministry = (requester?.ministry_access || '').toLowerCase();
+        const isLouvor = ministry === 'louvor';
+        const hasCustom = Array.isArray(requester?.custom_permissions) && requester.custom_permissions.includes('repertorio');
+
+        if (requesterLevel > 2 && !isLouvor && !hasCustom) {
           return reply.status(403).send({ 
             error: 'Acesso negado. Você não tem permissão para gerenciar o repertório.' 
           });

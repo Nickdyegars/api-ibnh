@@ -14,7 +14,7 @@ export class MemberService {
     const ministry = await prisma.ministry.findFirst({
       where: {
         name: { equals: ministryName, mode: 'insensitive' },
-        congregation_id: targetCongregationId || undefined
+        ...(targetCongregationId ? { congregation_id: targetCongregationId } : {})
       }
     });
 
@@ -80,7 +80,7 @@ export class MemberService {
       team_id: data.team ?? null,
       congregation_id: targetCongregationId || null,
       ministry_id: ministryId,
-      is_active: data.is_active ?? true
+      is_active: data.is_active !== undefined ? Boolean(data.is_active) : true
     };
 
     // 2. Só cria a relação se o usuário tiver selecionado alguma área
@@ -139,7 +139,7 @@ export class MemberService {
         role: data.role ?? null,
         team_id: data.team ?? null,
         ministry_id: ministryId,
-        is_active: data.is_active ?? true
+        is_active: data.is_active !== undefined ? Boolean(data.is_active) : true
       };
 
       if (data.congregation_id !== undefined) {

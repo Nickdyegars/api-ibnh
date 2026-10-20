@@ -62,7 +62,13 @@ export class RosterController {
 
     async list(request: FastifyRequest, reply: FastifyReply) {
         try {
-            const { ministry, congregationId } = getRostersQuerySchema.parse(request.query);
+            const requester = request.user as any;
+            const requesterLevel = Number(requester?.level ?? requester?.user_level ?? 3);
+            let { ministry, congregationId } = getRostersQuerySchema.parse(request.query);
+
+            if (requesterLevel !== 0 && requester?.congregation_id) {
+                congregationId = requester.congregation_id;
+            }
             const rosters = await rosterService.getAllRosters(ministry, congregationId);
             return reply.send(rosters);
         } catch (error: any) {

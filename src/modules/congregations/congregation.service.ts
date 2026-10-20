@@ -228,7 +228,7 @@ export class CongregationService {
 
     return await prisma.congregation.update({
       where: { id },
-      data
+      data: data as any
     });
   }
 

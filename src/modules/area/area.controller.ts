@@ -1,6 +1,6 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { MinistryAreaService } from './area.service.js';
-import { areaBodySchema, getAreasQuerySchema } from './area.schemas.js';
+import { areaBodySchema } from './area.schemas.js';
 import { AuditService } from '../../shared/services/audit/audit.service.js';
 
 const areaService = new MinistryAreaService();
@@ -9,8 +9,8 @@ export class AreaController {
 
   async list(request: FastifyRequest, reply: FastifyReply) {
     try {
-      const { ministry, congregationId } = getAreasQuerySchema.parse(request.query);
-      const areas = await areaService.getAreas(ministry, congregationId);
+      const { ministry, congregation_id } = request.query as { ministry?: string; congregation_id?: string };
+      const areas = await areaService.getAreas(ministry || '', congregation_id);
       return reply.send(areas);
     } catch (error: any) {
       return reply.status(500).send({ error: 'Erro ao buscar áreas' });
@@ -20,17 +20,25 @@ export class AreaController {
   async create(request: FastifyRequest, reply: FastifyReply) {
     try {
       const requester = request.user as any;
+      const requesterLevel = Number(requester?.level ?? requester?.user_level ?? 3);
       const data = areaBodySchema.parse(request.body);
 
-      // 👇 TRAVA DE SEGURANÇA: Apenas Admin (0) ou Líder (1) podem criar áreas 👇
-      if (requester.level > 1) {
+      // Trava de perfil: Apenas Admin (0, 1) ou Líder (2) podem criar áreas
+      if (requesterLevel >= 3) {
         return reply.status(403).send({ 
           error: 'Acesso negado. Apenas líderes ou administradores podem adicionar áreas.' 
         });
       }
 
-      if (requester.level !== 0 && requester.ministry_access !== 'all') {
-        if (data.ministry !== requester.ministry_access) {
+      if (requesterLevel > 0 && requester?.congregation_id) {
+        data.congregation_id = requester.congregation_id;
+      }
+
+      // Líder de ministério (nível 2)
+      if (requesterLevel === 2) {
+        const userMin = (requester.ministry_access || requester.ministry || '').trim().toLowerCase();
+        const dataMin = (data.ministry || '').trim().toLowerCase();
+        if (userMin !== 'all' && userMin !== dataMin) {
           return reply.status(403).send({ 
             error: `Acesso negado. Você só tem permissão para adicionar áreas no ministério: ${requester.ministry_access}.` 
           });
@@ -39,7 +47,6 @@ export class AreaController {
 
       const newArea = await areaService.createArea(data.name, data.ministry, data.congregation_id) as any;
 
-      // 📝 LOG: Criação de nova área (ex: Projeção, Câmera)
       AuditService.log(requester.sub, 'CREATE', 'MINISTRY_AREA', newArea?.id, data);
 
       return reply.status(201).send(newArea);
@@ -51,10 +58,10 @@ export class AreaController {
   async delete(request: FastifyRequest, reply: FastifyReply) {
     try {
       const requester = request.user as any;
+      const requesterLevel = Number(requester?.level ?? requester?.user_level ?? 3);
       const { id } = request.params as { id: string };
 
-      // 👇 TRAVA DE EXCLUSÃO: Apenas Admin (0) ou Líder (1) podem excluir áreas 👇
-      if (requester.level > 1) {
+      if (requesterLevel >= 3) {
          return reply.status(403).send({ 
            error: 'Acesso negado. Apenas líderes ou administradores podem excluir áreas.' 
          });
@@ -62,7 +69,6 @@ export class AreaController {
 
       await areaService.deleteArea(id);
 
-      // 📝 LOG: Exclusão de área
       AuditService.log(requester.sub, 'DELETE', 'MINISTRY_AREA', id);
 
       return reply.send({ message: 'Área apagada com sucesso' });

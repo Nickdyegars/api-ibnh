@@ -64,12 +64,20 @@ export class AuthController {
       const data = loginSchema.parse(request.body);
       const user = await authService.login(data);
 
+      let roleName = 'voluntario';
+      if (user.user_level === 0) roleName = 'admin_geral';
+      else if (user.user_level === 1) roleName = 'admin_congregacao';
+      else if (user.user_level === 2) roleName = 'lider_ministerio';
+
       const token = await reply.jwtSign({
         sub: user.id,
         email: user.email,
         level: user.user_level,
+        user_level: user.user_level,
+        role: roleName,
         ministry_access: user.ministry_access,
-        congregation_id: user.congregation_id
+        congregation_id: user.congregation_id,
+        custom_permissions: (user as any).custom_permissions || []
       });
 
       AuditService.log(
@@ -79,11 +87,6 @@ export class AuthController {
         user.id,
         { email: user.email }
       );
-
-      let roleName = 'voluntario';
-      if (user.user_level === 0) roleName = 'admin_geral';
-      else if (user.user_level === 1) roleName = 'admin_congregacao';
-      else if (user.user_level === 2) roleName = 'lider_ministerio';
 
       return reply.send({
         token,

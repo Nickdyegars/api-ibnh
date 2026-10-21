@@ -8,9 +8,8 @@ export async function authRoutes(app: FastifyInstance) {
   // LOGIN É PÚBLICO
   app.post('/login', (req, rep) => authController.login(req, rep));
 
-  // CADASTRO É PRIVADO (Requer Token do Admin)
+  // ROTAS PRIVADAS (Requerem Token JWT)
   app.register(async function privateRoutes(childApp) {
-    
     // O Cadeado JWT
     childApp.addHook('onRequest', async (request, reply) => {
       try {
@@ -19,6 +18,9 @@ export async function authRoutes(app: FastifyInstance) {
         return reply.status(401).send({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
       }
     });
+
+    // Sincronização de perfil da sessão ativa
+    childApp.get('/me', (req, rep) => authController.getMe(req, rep));
 
     // A rota de criação fica protegida!
     childApp.post('/register', (req, rep) => authController.register(req, rep));

@@ -74,65 +74,53 @@ export class PermissionsService {
     // Remove duplicados e strings vazias
     const cleanList = Array.from(new Set((customPermissions || []).filter(Boolean)));
 
-    await prisma.$executeRawUnsafe(
-      `UPDATE auth.users 
-       SET custom_permissions = $1::text[] 
-       WHERE id = $2::uuid`,
-      cleanList,
-      userId
-    );
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { custom_permissions: cleanList },
+      include: {
+        profile: true,
+        congregation: { select: { id: true, name: true, is_main: true } }
+      }
+    });
 
-    const updatedUserRows: any[] = await prisma.$queryRawUnsafe(
-      `SELECT u.id, u.email, u.user_level, u.ministry_access, u.congregation_id, u.custom_permissions,
-              p.full_name as name
-       FROM auth.users u
-       LEFT JOIN app.user_profiles p ON p.user_id = u.id
-       WHERE u.id = $1::uuid`,
-      userId
-    );
-
-    if (!updatedUserRows || updatedUserRows.length === 0) {
-      throw new Error('Usuário não encontrado.');
-    }
-
-    const u = updatedUserRows[0];
     let roleName = 'voluntario';
-    if (u.user_level === 0) roleName = 'admin_geral';
-    else if (u.user_level === 1) roleName = 'admin_congregacao';
-    else if (u.user_level === 2) roleName = 'lider_ministerio';
+    if (updatedUser.user_level === 0) roleName = 'admin_geral';
+    else if (updatedUser.user_level === 1) roleName = 'admin_congregacao';
+    else if (updatedUser.user_level === 2) roleName = 'lider_ministerio';
 
     return {
-      id: u.id,
-      name: u.name || u.email.split('@')[0],
-      email: u.email,
-      level: u.user_level,
+      id: updatedUser.id,
+      name: updatedUser.profile?.full_name || updatedUser.email.split('@')[0],
+      email: updatedUser.email,
+      level: updatedUser.user_level,
+      user_level: updatedUser.user_level,
       role: roleName,
-      ministry: u.ministry_access,
-      congregation_id: u.congregation_id,
-      custom_permissions: u.custom_permissions || []
+      ministry: updatedUser.ministry_access,
+      congregation_id: updatedUser.congregation_id,
+      congregation: updatedUser.congregation,
+      custom_permissions: updatedUser.custom_permissions || []
     };
   }
 
   async getUserCustomPermissions(userId: string) {
-    const userRows: any[] = await prisma.$queryRawUnsafe(
-      `SELECT u.id, u.email, u.user_level, u.custom_permissions, p.full_name as name
-       FROM auth.users u
-       LEFT JOIN app.user_profiles p ON p.user_id = u.id
-       WHERE u.id = $1::uuid`,
-      userId
-    );
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        profile: true
+      }
+    });
 
-    if (!userRows || userRows.length === 0) {
+    if (!user) {
       throw new Error('Usuário não encontrado.');
     }
 
-    const u = userRows[0];
     return {
-      userId: u.id,
-      name: u.name || u.email,
-      email: u.email,
-      level: u.user_level,
-      custom_permissions: u.custom_permissions || []
+      userId: user.id,
+      name: user.profile?.full_name || user.email,
+      email: user.email,
+      level: user.user_level,
+      user_level: user.user_level,
+      custom_permissions: user.custom_permissions || []
     };
   }
 }

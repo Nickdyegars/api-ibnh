@@ -59,6 +59,17 @@ export class MinistryAreaService {
     });
   }
 
+  async findById(id: string) {
+    return await prisma.ministryArea.findUnique({
+      where: { id },
+      include: {
+        ministry: {
+          select: { id: true, name: true, congregation_id: true }
+        }
+      }
+    });
+  }
+
   async deleteArea(id: string) {
     await prisma.ministryArea.delete({
       where: { id }

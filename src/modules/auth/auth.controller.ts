@@ -95,6 +95,7 @@ export class AuthController {
           name: (user as any).profile?.full_name || user.email.split('@')[0],
           email: user.email,
           level: user.user_level,
+          user_level: user.user_level,
           role: roleName,
           ministry_access: user.ministry_access,
           congregation_id: user.congregation_id,
@@ -108,6 +109,50 @@ export class AuthController {
         return reply.status(400).send({ error: error.errors[0].message });
       }
       return reply.status(401).send({ error: error.message });
+    }
+  }
+
+  async getMe(request: FastifyRequest, reply: FastifyReply) {
+    try {
+      const requester = request.user as any;
+      if (!requester || !requester.sub) {
+        return reply.status(401).send({ error: 'Não autorizado.' });
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: requester.sub },
+        include: {
+          profile: true,
+          congregation: { select: { id: true, name: true, is_main: true } }
+        }
+      });
+
+      if (!user) {
+        return reply.status(404).send({ error: 'Usuário não encontrado.' });
+      }
+
+      let roleName = 'voluntario';
+      if (user.user_level === 0) roleName = 'admin_geral';
+      else if (user.user_level === 1) roleName = 'admin_congregacao';
+      else if (user.user_level === 2) roleName = 'lider_ministerio';
+
+      return reply.send({
+        user: {
+          id: user.id,
+          name: (user as any).profile?.full_name || user.email.split('@')[0],
+          email: user.email,
+          level: user.user_level,
+          user_level: user.user_level,
+          role: roleName,
+          ministry_access: user.ministry_access,
+          congregation_id: user.congregation_id,
+          congregation: (user as any).congregation,
+          custom_permissions: (user as any).custom_permissions || [],
+          mustChangePassword: user.must_change_password
+        }
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ error: 'Erro ao carregar dados do usuário.' });
     }
   }
 

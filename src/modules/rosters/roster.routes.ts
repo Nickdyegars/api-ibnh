@@ -10,7 +10,6 @@ export async function rosterRoutes(app: FastifyInstance) {
 
   app.get('/', (req, rep) => rosterController.list(req, rep));
   
-  // NOVA ROTA POST AQUI:
   app.post('/', (req, rep) => rosterController.create(req, rep));
   
   app.delete('/:id', (req, rep) => rosterController.delete(req, rep));
@@ -20,4 +19,8 @@ export async function rosterRoutes(app: FastifyInstance) {
   app.put('/shift/:shiftId', (req, rep) => rosterController.updateShift(req, rep));
 
   app.post('/sync-calendar', (req, rep) => rosterController.syncCalendar(req, rep));
+
+  app.get('/settings', (req, rep) => rosterController.getSettings(req, rep));
+
+  app.post('/settings', (req, rep) => rosterController.saveSettings(req, rep));
 }

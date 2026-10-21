@@ -67,6 +67,20 @@ export class AreaController {
          });
       }
 
+      if (requesterLevel === 2) {
+        const area = await areaService.findById(id);
+        if (!area) {
+          return reply.status(404).send({ error: 'Área não encontrada.' });
+        }
+        const userMin = (requester.ministry_access || requester.ministry || '').trim().toLowerCase();
+        const areaMin = (area.ministry?.name || '').trim().toLowerCase();
+        if (userMin !== 'all' && userMin !== areaMin) {
+          return reply.status(403).send({ 
+            error: `Acesso negado: Você só pode excluir áreas do seu ministério (${requester.ministry_access}).` 
+          });
+        }
+      }
+
       await areaService.deleteArea(id);
 
       AuditService.log(requester.sub, 'DELETE', 'MINISTRY_AREA', id);

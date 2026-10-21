@@ -260,4 +260,38 @@ export class RosterController {
             return reply.status(400).send({ error: error.message || 'Erro ao sincronizar agenda.' });
         }
     }
+
+    async getSettings(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const settings = await rosterService.getRosterSettings();
+            return reply.send({ settings });
+        } catch (error: any) {
+            return reply.status(400).send({ error: error.message });
+        }
+    }
+
+    async saveSettings(request: FastifyRequest, reply: FastifyReply) {
+        try {
+            const user = request.user as any;
+            const userLevel = Number(user?.level ?? user?.user_level ?? 3);
+            const { congregationId, defaultMode, ministryModes } = request.body as any;
+
+            if (userLevel > 1) {
+                return reply.status(403).send({ error: 'Acesso negado: Apenas administradores podem alterar configurações de escala.' });
+            }
+
+            if (userLevel === 1 && user.congregation_id && congregationId !== user.congregation_id) {
+                return reply.status(403).send({ error: 'Acesso negado: Você só pode configurar a sua congregação.' });
+            }
+
+            const updated = await rosterService.saveRosterSettings(congregationId, {
+                defaultMode,
+                ministryModes
+            });
+
+            return reply.send({ success: true, settings: updated });
+        } catch (error: any) {
+            return reply.status(400).send({ error: error.message });
+        }
+    }
 }

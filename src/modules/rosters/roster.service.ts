@@ -98,8 +98,6 @@ export class RosterService {
                 }
             });
 
-            let whatsappBackupText = `📋 *ESCALA CONSOLIDADA - ${data.ministry.toUpperCase()}* 📋\n\n`;
-
             for (const shift of data.shifts) {
                 const dateParts = shift.date.split('/');
                 let shiftDate: Date;
@@ -117,8 +115,6 @@ export class RosterService {
                         day_name: shift.dayName
                     }
                 });
-
-                whatsappBackupText += `📅 *DATA: ${shift.date} (${shift.dayName})*\n`;
 
                 const insertedMembersInShift = new Set<string>();
 
@@ -139,13 +135,84 @@ export class RosterService {
                                 area_name: areaName
                             }
                         });
-
-                        whatsappBackupText += ` 🔹 ${memberString}\n`;
-                    } else if (memberString.includes('FALTA GENTE')) {
-                        whatsappBackupText += ` ⚠️ ${memberString}\n`;
                     }
                 }
+            }
+
+            // GERAÇÃO DE TEXTO PARA BACKUP / WHATSAPP FORMATADO
+            const formatDDMM = (dStr: string) => {
+                if (dStr.includes('/')) {
+                    const parts = dStr.split('/');
+                    return `${parts[0]?.padStart(2, '0')}/${parts[1]?.padStart(2, '0')}`;
+                }
+                return dStr;
+            };
+
+            const getSundayWeekKey = (dStr: string) => {
+                const parts = dStr.split('/');
+                if (parts.length >= 3) {
+                    const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]), 12, 0, 0);
+                    const diff = d.getDate() - d.getDay();
+                    const sun = new Date(d.setDate(diff));
+                    return `${sun.getFullYear()}-${String(sun.getMonth() + 1).padStart(2, '0')}-${String(sun.getDate()).padStart(2, '0')}`;
+                }
+                return dStr;
+            };
+
+            const formatTeamMember = (memberStr: string) => {
+                const match = memberStr.match(/^(.*?) \((.*?)\)$/);
+                if (match) {
+                    const rawNome = (match[1] ?? '').trim();
+                    const area = (match[2] ?? '').trim();
+                    const isMissing = rawNome.toUpperCase().includes('FALTA GENTE');
+                    const icone = isMissing ? '⚠️' : '🔹';
+                    const nomeLimpo = rawNome.replace(/⚠️/g, '').trim();
+                    return `${icone} ${area}: ${nomeLimpo}`;
+                }
+                const isMissing = memberStr.toUpperCase().includes('FALTA GENTE');
+                const icone = isMissing ? '⚠️' : '🔹';
+                return `${icone} ${memberStr.trim()}`;
+            };
+
+            const isLouvor = (data.ministry || '').toLowerCase().includes('louvor');
+
+            let whatsappBackupText = `🗓️ *ESCALA - ${data.ministry.toUpperCase()}*\n`;
+            if (data.month) {
+                const formattedMonth = data.month.includes('-') ? data.month.split('-').reverse().join('/') : data.month;
+                whatsappBackupText += `Mês de Referência: ${formattedMonth}\n\n`;
+            }
+
+            const weeksMap = new Map<string, any[]>();
+            data.shifts.forEach((shift: any) => {
+                const wKey = getSundayWeekKey(shift.date);
+                if (!weeksMap.has(wKey)) weeksMap.set(wKey, []);
+                weeksMap.get(wKey)!.push(shift);
+            });
+
+            weeksMap.forEach((weekShifts) => {
+                const firstDate = formatDDMM(weekShifts[0].date);
+                const lastDate = formatDDMM(weekShifts[weekShifts.length - 1].date);
+                const dateLabel = firstDate === lastDate ? `| ${firstDate} |` : `| ${firstDate} - ${lastDate} |`;
+                whatsappBackupText += `${dateLabel}\n`;
+
+                const repShift = weekShifts.find(s => s.team && s.team.length > 0 && s.team[0] !== '') || weekShifts[0];
+                const team = repShift?.team || [];
+
+                if (team.length > 0 && team[0] !== '') {
+                    team.forEach((m: string) => {
+                        whatsappBackupText += `${formatTeamMember(m)}\n`;
+                    });
+                } else {
+                    whatsappBackupText += `⚠️ SEM EQUIPE\n`;
+                }
                 whatsappBackupText += `\n`;
+            });
+
+            if (isLouvor) {
+                whatsappBackupText += `-----------------------\n`;
+                whatsappBackupText += `> OBS.1: A escala segue sempre Domingo->Quinta. Logo, a primeira data é Domingo.\n`;
+                whatsappBackupText += `> OBS.2: Ensaios sempre ao Sábados, 15h. Se houver alguma mudança, será avisado.\n`;
+                whatsappBackupText += `> OBS.3: Estar na igreja às 17h no Domingo.\n`;
             }
 
             return {

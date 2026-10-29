@@ -34,6 +34,9 @@ export class AnalyticsService {
 
         let totalVisits = 0;
         let totalClicks = 0;
+        let homeVisits = 0;
+        let galleryVisits = 0;
+        let albumVisits = 0;
 
         // Usamos Map para somar os dados agrupados
         const visitsMap = new Map();
@@ -60,6 +63,15 @@ export class AnalyticsService {
             if (record.action === 'VISIT') {
                 totalVisits++;
                 visitsMap.set(dateKey, (visitsMap.get(dateKey) || 0) + 1);
+
+                const page = (record.page || '').toLowerCase();
+                if (page.includes('galeria')) {
+                    galleryVisits++;
+                } else if (page.includes('álbum') || page.includes('album')) {
+                    albumVisits++;
+                } else {
+                    homeVisits++;
+                }
             } else {
                 totalClicks++;
                 // Agrupa os cliques pelo nome do botão para o segundo gráfico
@@ -75,7 +87,14 @@ export class AnalyticsService {
 
         // 5. Converte no formato perfeito para o Recharts
         return {
-            summary: { totalVisits, totalClicks },
+            summary: { 
+                totalVisits, 
+                totalClicks,
+                homeVisits,
+                galleryVisits,
+                albumVisits,
+                galleryTotalVisits: galleryVisits + albumVisits
+            },
             visitsChart: Array.from(visitsMap, ([name, quantidade]) => ({ name, quantidade })),
             clicksChart: Array.from(clicksMap, ([name, quantidade]) => ({ name, quantidade }))
         };

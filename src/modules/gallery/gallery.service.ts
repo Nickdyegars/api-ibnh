@@ -1,6 +1,10 @@
 import { prisma } from "../../shared/database/prisma.js";
 import { CreateAlbumType, UpdateAlbumType } from "./gallery.schemas.js";
-import { deleteImage } from "../../shared/storage/minio.js"; // Ajuste o caminho
+import {
+  deleteImage,
+  deleteFolder,
+  sanitizeAlbumFolderName,
+} from "../../shared/storage/minio.js";
 
 export class GalleryService {
   // ==========================================
@@ -8,13 +12,37 @@ export class GalleryService {
   // ==========================================
 
   async getAllAlbums(publicOnly: boolean = false) {
-    return await prisma.galleryAlbum.findMany({
+    const albums = await prisma.galleryAlbum.findMany({
       where: publicOnly ? { is_active: true } : {},
       orderBy: { event_date: "desc" },
       include: {
-        _count: { select: { photos: true } }, // Traz a quantidade de fotos do álbum
+        _count: { select: { photos: true } },
       },
     });
+
+    const albumViews = await prisma.siteAnalytics.groupBy({
+      by: ["page"],
+      where: {
+        action: "VISIT",
+        page: { startsWith: "Álbum: " },
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    const viewsMap = new Map<string, number>();
+    for (const v of albumViews) {
+      if (v.page) {
+        const albumId = v.page.replace("Álbum: ", "").trim();
+        viewsMap.set(albumId, (viewsMap.get(albumId) || 0) + v._count.id);
+      }
+    }
+
+    return albums.map((album) => ({
+      ...album,
+      views_count: viewsMap.get(album.id) || 0,
+    }));
   }
 
   async getAlbumById(id: string) {
@@ -25,11 +53,22 @@ export class GalleryService {
       },
     });
     if (!album) throw new Error("Álbum não encontrado.");
-    return album;
+
+    const viewsCount = await prisma.siteAnalytics.count({
+      where: {
+        action: "VISIT",
+        page: `Álbum: ${id}`,
+      },
+    });
+
+    return {
+      ...album,
+      views_count: viewsCount,
+    };
   }
 
   async createAlbum(data: CreateAlbumType) {
-    // 👇 Calcula a expiração: Hoje + 7 dias exatos
+    // Calcula a expiração: Hoje + 7 dias exatos
     const expirationDate = new Date();
     expirationDate.setDate(expirationDate.getDate() + 7);
 
@@ -52,7 +91,7 @@ export class GalleryService {
     if (data.cover_url !== undefined)
       payload.cover_url = data.cover_url || null;
     if (data.is_active !== undefined) payload.is_active = data.is_active;
-    if (data.expires_at) payload.expires_at = new Date(data.expires_at); // 👇 LINHA ADICIONADA
+    if (data.expires_at) payload.expires_at = new Date(data.expires_at);
 
     return await prisma.galleryAlbum.update({
       where: { id },
@@ -70,12 +109,15 @@ export class GalleryService {
       throw new Error("Álbum não encontrado.");
     }
 
-    // 1. Apaga a imagem de capa do MinIO se existir
+    // 1. Apaga a pasta inteira do álbum do MinIO (com todas as fotos e capa)
+    const albumFolder = sanitizeAlbumFolderName(album.title);
+    await deleteFolder(`galeria/${albumFolder}/`);
+
+    // 2. Apaga individualmente como fallback caso arquivos estejam em caminhos legados
     if (album.cover_url) {
       await deleteImage(album.cover_url);
     }
 
-    // 2. Apaga todas as fotos do álbum do MinIO
     if (album.photos && album.photos.length > 0) {
       for (const photo of album.photos) {
         if (photo.image_url) {
@@ -142,22 +184,34 @@ export class GalleryService {
       return { message: "Nenhum álbum para expirar." };
 
     for (const album of expiredAlbums) {
-      // 1. Busca todas as fotos deste álbum
+      console.log(`🧹 Limpando álbum expirado: "${album.title}" (${album.id})...`);
+
+      // 1. Apaga a pasta inteira do álbum do MinIO (fotos + capa)
+      const albumFolder = sanitizeAlbumFolderName(album.title);
+      await deleteFolder(`galeria/${albumFolder}/`);
+
+      // 2. Apaga capa se estiver em caminho legado
+      if (album.cover_url) {
+        await deleteImage(album.cover_url);
+      }
+
+      // 3. Apaga fotos individuais caso alguma esteja fora da pasta do álbum
       const photos = await prisma.galleryPhoto.findMany({
         where: { album_id: album.id },
       });
-
-      // 2. Apaga FISICAMENTE do MinIO (liberando os 150GB!)
       for (const photo of photos) {
-        await deleteImage(photo.image_url);
+        if (photo.image_url) {
+          await deleteImage(photo.image_url);
+        }
       }
 
-      // 3. Apaga do banco de dados e marca o álbum como expirado
+      // 4. Apaga as fotos do banco de dados e marca o álbum como expirado e inativo
       await prisma.galleryPhoto.deleteMany({ where: { album_id: album.id } });
       await prisma.galleryAlbum.update({
         where: { id: album.id },
-        data: { is_expired: true, cover_url: null }, // Remove a capa também
+        data: { is_expired: true, cover_url: null, is_active: false },
       });
+      console.log(`✅ Álbum "${album.title}" expirado com sucesso e arquivos removidos do MinIO.`);
     }
 
     return {

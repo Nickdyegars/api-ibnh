@@ -40,8 +40,8 @@ export async function uploadRoutes(app: FastifyInstance) {
             mimetype: part.mimetype
           };
         } else if (part.type === 'field' && part.fieldname === 'folder' && typeof part.value === 'string') {
-          // Permite passar pasta personalizada (ex: 'cms', 'galeria', etc.)
-          folder = part.value.trim() || 'galeria';
+          // Permite passar pasta personalizada (ex: 'cms', 'galeria/Culto 25-10', etc.)
+          folder = part.value.trim().replace(/^\/+|\/+$/g, '') || 'galeria';
         }
       }
 

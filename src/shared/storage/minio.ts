@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import path from 'path';
 
-// Carrega as variáveis (ajuste o path se a sua estrutura de pastas for diferente)
 dotenv.config();
 
 export const BUCKET_NAME = process.env.MINIO_BUCKET || 'ibnh-uploads';
@@ -45,20 +44,24 @@ export async function setupMinioBucket() {
     }
 }
 
+// Sanitiza o nome do álbum para ser usado como pasta no storage/MinIO
+export function sanitizeAlbumFolderName(title: string): string {
+    if (!title) return 'sem-nome';
+    return title
+        .trim()
+        .replace(/[/\\:*?"<>|]/g, '-') // Remove caracteres inválidos para pastas
+        .replace(/\s+/g, ' ')          // Remove múltiplos espaços seguidos
+        .trim();
+}
+
 // Faz o upload e devolve o link usando a MINIO_PUBLIC_URL
-// minio.ts
 export async function uploadImage(fileName: string, fileBuffer: Buffer, mimeType: string, folder: string = 'geral') {
-    // 1. Extrai apenas a extensão do arquivo original (ex: '.jpg', '.png')
     const ext = path.extname(fileName);
-
-    // 2. Gera um ID 100% único, impossível de colidir e livre de caracteres estranhos
     const uniqueId = crypto.randomUUID();
-
-    // 3. Monta o novo nome limpo e seguro (ex: 'f47ac10b-58cc-4372-a567-0e02b2c3d479.jpg')
     const safeFileName = `${uniqueId}${ext}`;
 
-    // O caminho final
-    const objectPath = `${folder}/${safeFileName}`;
+    const cleanFolder = folder.replace(/^\/+|\/+$/g, '');
+    const objectPath = cleanFolder ? `${cleanFolder}/${safeFileName}` : safeFileName;
 
     await minioClient.putObject(BUCKET_NAME, objectPath, fileBuffer, undefined, {
         'Content-Type': mimeType
@@ -67,33 +70,55 @@ export async function uploadImage(fileName: string, fileBuffer: Buffer, mimeType
     return `${PUBLIC_URL}/${BUCKET_NAME}/${objectPath}`;
 }
 
+// Deleta um arquivo individual a partir da sua URL completa
 export async function deleteImage(imageUrl: string) {
     if (!imageUrl) return;
 
     try {
-        // 1. Extrai os dados de forma nativa, ignorando domínio, porta ou IP base
         const parsedUrl = new URL(imageUrl);
-        
-        // 2. O pathname vai retornar algo como: "/ibnh-uploads/comprovantes/foto.jpg"
-        // Removemos a primeira barra e dividimos os caminhos
         const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
-        
-        // 3. O primeiro elemento após a barra sempre será o nome do bucket
         const bucketFromUrl = pathParts[0]; 
-        
-        // 4. Todo o restante do caminho será a Key exata do arquivo no storage
-        // Ex: "comprovantes/foto.jpg" ou "profiles/foto.png"
-        const objectPath = pathParts.slice(1).join('/');
+        const objectPath = decodeURIComponent(pathParts.slice(1).join('/'));
 
-        // 5. Dispara a exclusão com a chave exata
         if (bucketFromUrl === BUCKET_NAME && objectPath) {
             await minioClient.removeObject(BUCKET_NAME, objectPath);
             console.log(`🗑️ Arquivo expurgado com sucesso do MinIO: ${objectPath}`);
         } else {
-            // Agora o console vai te avisar se algum link for ignorado!
             console.warn(`⚠️ MinIO ignorou o link pois não pertence ao bucket '${BUCKET_NAME}': ${imageUrl}`);
         }
     } catch (error) {
-        console.error(`❌ Falha crítica ao deletar arquivo do MinIO (${imageUrl}):`, error);
+        console.error(`❌ Falha ao deletar arquivo do MinIO (${imageUrl}):`, error);
     }
+}
+
+// Deleta uma pasta inteira e todos os arquivos contidos nela no MinIO
+export async function deleteFolder(prefix: string) {
+    if (!prefix) return;
+
+    try {
+        const cleanPrefix = prefix.replace(/^\/+/, '');
+        const objectsToDelete: string[] = [];
+        const stream = minioClient.listObjectsV2(BUCKET_NAME, cleanPrefix, true);
+
+        for await (const obj of stream) {
+            if (obj.name) objectsToDelete.push(obj.name);
+        }
+
+        if (objectsToDelete.length > 0) {
+            await minioClient.removeObjects(BUCKET_NAME, objectsToDelete);
+            console.log(`🗑️ Pasta '${cleanPrefix}' com ${objectsToDelete.length} arquivo(s) expurgada do MinIO.`);
+        } else {
+            console.log(`ℹ️ Nenhum arquivo encontrado no MinIO com prefixo '${cleanPrefix}'.`);
+        }
+    } catch (error) {
+        console.error(`❌ Erro ao deletar pasta '${prefix}' do MinIO:`, error);
+    }
+}
+
+// Move/renomeia um objeto dentro do bucket
+export async function moveObject(oldKey: string, newKey: string) {
+    if (!oldKey || !newKey || oldKey === newKey) return;
+    const conds = new Minio.CopyConditions();
+    await minioClient.copyObject(BUCKET_NAME, newKey, `/${BUCKET_NAME}/${oldKey}`, conds);
+    await minioClient.removeObject(BUCKET_NAME, oldKey);
 }
